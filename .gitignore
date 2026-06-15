@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.claude/
+venv/
+*.egg-info/
+.pytest_cache/
+.DS_Store
+tests/
+
+# Claude Code machine-local settings (contains absolute paths; never commit)
+.claude/settings.local.json

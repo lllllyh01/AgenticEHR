@@ -1,0 +1,46 @@
+test_all_sections_present (tests.test_unittest_suite.TestAgentGuardrails.test_all_sections_present) ... ok
+test_faithful_to_probability (tests.test_unittest_suite.TestAgentGuardrails.test_faithful_to_probability) ... ok
+test_low_confidence_reflected (tests.test_unittest_suite.TestAgentGuardrails.test_low_confidence_reflected) ... ok
+test_no_banned_phrases (tests.test_unittest_suite.TestAgentGuardrails.test_no_banned_phrases) ... ok
+test_unsafe_backend_triggers_fallback (tests.test_unittest_suite.TestAgentGuardrails.test_unsafe_backend_triggers_fallback) ... 2026-06-13 01:20:21,200 | WARNING | agentic_ehr.agent.summary_agent | Guardrail issues from bad backend: ["missing or empty section: 'What may be contributing'", "missing or empty section: 'What this means'", "missing or empty section: 'What to do next'", "missing or empty section: 'When to seek care urgently'", "overclaiming/diagnostic phrase detected: 'you have'", "overclaiming/diagnostic phrase detected: 'you will'", "probability not faithfully stated in 'What we found'", 'low confidence not reflected in summary']
+ok
+test_featurizer_counts_non_negative (tests.test_unittest_suite.TestData.test_featurizer_counts_non_negative) ... 2026-06-13 01:20:21,203 | INFO    | agentic_ehr.data.featurize | Featurizer fitted: 13 code columns, 2 numeric value columns
+ok
+test_featurizer_vocab_is_deterministic (tests.test_unittest_suite.TestData.test_featurizer_vocab_is_deterministic) ... 2026-06-13 01:20:21,212 | INFO    | agentic_ehr.data.featurize | Featurizer fitted: 13 code columns, 2 numeric value columns
+2026-06-13 01:20:21,212 | INFO    | agentic_ehr.data.featurize | Featurizer fitted: 13 code columns, 2 numeric value columns
+ok
+test_positive_rate_near_target (tests.test_unittest_suite.TestData.test_positive_rate_near_target) ... ok
+test_synthetic_is_reproducible (tests.test_unittest_suite.TestData.test_synthetic_is_reproducible) ... ok
+2026-06-13 01:20:21,252 | INFO    | agentic_ehr.config | Loaded config from /Users/yhlin/Graduate/CompMed/AgenticEHR/config/default.yaml
+2026-06-13 01:20:21,262 | INFO    | agentic_ehr.data.featurize | Featurizer fitted: 13 code columns, 2 numeric value columns
+2026-06-13 01:20:21,262 | INFO    | agentic_ehr.data.dataset | Built EHRDataset: 600 patients, source=synthetic
+2026-06-13 01:20:21,294 | INFO    | agentic_ehr.models.xgboost_model | Trained XGBoost on 420 rows, 18 features
+2026-06-13 01:20:21,296 | INFO    | agentic_ehr.models.xgboost_model | Fitted isotonic calibrator on 90 held-out rows
+2026-06-13 01:20:21,300 | INFO    | agentic_ehr.explain.attributions | SHAP not available; using approx attributions.
+test_model_metrics_perfect_separation (tests.test_unittest_suite.TestEvaluation.test_model_metrics_perfect_separation) ... ok
+test_summary_quality_flags_inconsistency (tests.test_unittest_suite.TestEvaluation.test_summary_quality_flags_inconsistency) ... ok
+test_summary_quality_passes (tests.test_unittest_suite.TestEvaluation.test_summary_quality_passes) ... ok
+2026-06-13 01:20:21,309 | INFO    | agentic_ehr.config | Loaded config from /Users/yhlin/Graduate/CompMed/AgenticEHR/config/default.yaml
+2026-06-13 01:20:21,321 | INFO    | agentic_ehr.data.featurize | Featurizer fitted: 13 code columns, 2 numeric value columns
+2026-06-13 01:20:21,321 | INFO    | agentic_ehr.data.dataset | Built EHRDataset: 600 patients, source=synthetic
+2026-06-13 01:20:21,336 | INFO    | agentic_ehr.models.xgboost_model | Trained XGBoost on 420 rows, 18 features
+2026-06-13 01:20:21,337 | INFO    | agentic_ehr.models.xgboost_model | Fitted isotonic calibrator on 90 held-out rows
+2026-06-13 01:20:21,340 | INFO    | agentic_ehr.explain.attributions | SHAP not available; using approx attributions.
+test_concept_map_resolves_and_degrades (tests.test_unittest_suite.TestExplain.test_concept_map_resolves_and_degrades) ... ok
+test_risk_profile_contract (tests.test_unittest_suite.TestExplain.test_risk_profile_contract) ... ok
+2026-06-13 01:20:21,342 | INFO    | agentic_ehr.config | Loaded config from /Users/yhlin/Graduate/CompMed/AgenticEHR/config/default.yaml
+2026-06-13 01:20:21,353 | INFO    | agentic_ehr.data.featurize | Featurizer fitted: 13 code columns, 2 numeric value columns
+2026-06-13 01:20:21,353 | INFO    | agentic_ehr.data.dataset | Built EHRDataset: 600 patients, source=synthetic
+2026-06-13 01:20:21,369 | INFO    | agentic_ehr.models.xgboost_model | Trained XGBoost on 420 rows, 18 features
+2026-06-13 01:20:21,369 | INFO    | agentic_ehr.models.xgboost_model | Fitted isotonic calibrator on 90 held-out rows
+2026-06-13 01:20:21,372 | INFO    | agentic_ehr.explain.attributions | SHAP not available; using approx attributions.
+test_learns_signal (tests.test_unittest_suite.TestModel.test_learns_signal) ... ok
+test_predict_output_in_range (tests.test_unittest_suite.TestModel.test_predict_output_in_range) ... ok
+test_save_load_roundtrip (tests.test_unittest_suite.TestModel.test_save_load_roundtrip) ... 2026-06-13 01:20:21,379 | INFO    | agentic_ehr.models.xgboost_model | Saved XGBoost model to /tmp/claude-501/tmp68yucnqc/m.joblib
+2026-06-13 01:20:21,380 | INFO    | agentic_ehr.models.xgboost_model | Loaded XGBoost model from /tmp/claude-501/tmp68yucnqc/m.joblib
+ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.181s
+
+OK

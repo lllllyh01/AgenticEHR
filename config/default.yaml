@@ -1,0 +1,68 @@
+# Default configuration. Everything benchmark-specific is configurable here
+# rather than hard-coded, so EHR-shot / FEMR specifics can be filled in later.
+
+seed: 42
+
+data:
+  source: synthetic          # one of: synthetic | femr
+  synthetic:
+    n_patients: 4000
+    positive_rate: 0.18
+  femr:
+    # Paths to FEMR/EHR-shot extracts. Used only when source == femr.
+    # The loader expects per-patient longitudinal events and a labels table.
+    features_path: null       # parquet/csv of precomputed features (optional)
+    events_path: null         # parquet/csv of (patient_id, time, code, value)
+    labels_path: null         # parquet/csv of (patient_id, label_time, value)
+  featurize:
+    lookback_days: 365        # count events within this window before prediction time
+    max_features: 200         # keep the most frequent codes
+
+task:
+  name: "12_month_hospitalization"
+  description: "Risk of unplanned hospitalization within 12 months"
+  positive_label: "hospitalization within 12 months"
+  horizon: "the next 12 months"
+
+model:
+  name: xgboost
+  params:
+    n_estimators: 300
+    max_depth: 5
+    learning_rate: 0.05
+    subsample: 0.9
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42        # seed XGBoost for reproducible training
+    n_jobs: 4
+  calibrate: true             # calibrate probabilities on a held-out split
+  calibration_method: isotonic
+
+explain:
+  top_k_contributors: 5
+  method: auto                # auto -> shap if installed else fallback
+  concept_map_path: null      # optional YAML overriding the built-in concept map
+
+agent:
+  # The AI (LLM) summary agent is the core of this system and the ONLY summary
+  # generator. If it cannot run (missing SDK or API key, or the model call
+  # fails), the system RAISES — there is no fallback.
+  risk_tiers:                 # calibrated-probability cutoffs -> tier
+    - {max: 0.10, tier: low}
+    - {max: 0.30, tier: moderate}
+    - {max: 1.01, tier: elevated}
+  llm:
+    # Provider-agnostic LLM agent. Supported providers and their API keys:
+    #   gemini -> GEMINI_API_KEY (or GOOGLE_API_KEY)   [default; best free model]
+    #   claude -> ANTHROPIC_API_KEY
+    #   openai -> OPENAI_API_KEY
+    provider: gemini          # one of: gemini | claude | openai
+    model: gemini-3.5-flash               # null -> the provider's best default
+                              #   gemini: gemini-2.5-pro
+                              #   claude: claude-opus-4-8
+                              #   openai: gpt-4o
+    max_tokens: 4000          # headroom for the JSON summary (+ thinking on Claude)
+
+paths:
+  model_dir: artifacts/models
+  reports_dir: artifacts/reports
