@@ -1,21 +1,23 @@
 """LLM summary backend — the core of the system.
 
-Turns a structured :class:`RiskProfile` into the five-section patient summary
-using a hosted LLM. Three providers are supported behind one interface:
+Turns a structured :class:`RiskProfile` into a patient-friendly summary using a
+hosted LLM. Three providers are supported behind one interface:
 
 * ``gemini``  — Google Gemini (the **default**; best free model). Needs
   ``GEMINI_API_KEY`` (or ``GOOGLE_API_KEY``) and the ``google-genai`` SDK.
 * ``claude``  — Anthropic Claude. Needs ``ANTHROPIC_API_KEY`` and ``anthropic``.
 * ``openai``  — OpenAI GPT. Needs ``OPENAI_API_KEY`` and ``openai``.
 
-Common design (per LLM best practice):
+Two output modes, both driven by the same non-diagnostic safety prompt:
 
-* **Structured outputs**: every provider is constrained to emit a strict JSON
-  object with exactly the five sections, so we never parse free-form text.
-* **One system prompt**: a single, stable, non-diagnostic safety prompt is shared
-  across providers; the per-patient ``RiskProfile`` is the volatile user turn.
-* **No fallback**: if the SDK or key is missing, or the API call fails, the
-  backend raises :class:`SummaryBackendError` — the caller surfaces it.
+* **template** (default): the model is constrained to **structured outputs** — a
+  strict JSON object with exactly the five fixed sections, so we never parse
+  free-form text. The section set lives in :mod:`agent.templates`.
+* **free**: the model writes one cohesive, free-form patient-friendly summary
+  (no fixed sections, no JSON schema). The same safety rules still apply.
+
+No fallback: if the SDK or key is missing, or the API call fails, the backend
+raises :class:`SummaryBackendError` — the caller surfaces it.
 """
 from __future__ import annotations
 
@@ -46,23 +48,33 @@ _GEMINI_SCHEMA = {
     "propertyOrdering": list(T.SECTIONS),
 }
 
-_SYSTEM_PROMPT = f"""You are a careful health-information assistant. You translate a
-machine-learning model's risk estimate into a patient-friendly summary.
-
-Hard rules — these are non-negotiable safety constraints:
+# Shared, non-negotiable safety rules used by both output modes.
+_SAFETY_RULES = """Hard rules — these are non-negotiable safety constraints:
 - You are NOT a doctor. Never diagnose, never claim certainty, never tell the
   patient they "have", "will get", or are "going to" develop any disease.
 - Use ONLY the numbers and factors in the structured input. Never invent
   symptoms, lab values, diagnoses, medications, or treatments.
+- State the estimated chance using the exact whole-number percentage from the
+  input (e.g. "about 42%"), and make clear it is a statistical estimate, not a
+  prediction of what will happen to this person.
 - Reflect the model's stated uncertainty honestly. When the confidence label is
   "lower", explicitly tell the reader to treat the estimate with extra caution.
 - Use plain, calm, non-alarming language a non-expert can read.
 - Recommend discussing the results with a qualified clinician.
 
+Avoid these phrasings entirely: "you have", "you will", "you are going to",
+"diagnosed with", "is certain", "guaranteed", "you must take", "stop taking",
+"no need to see"."""
+
+# Template mode: force the five fixed sections via structured outputs.
+_SYSTEM_PROMPT = f"""You are a careful health-information assistant. You translate a
+machine-learning model's risk estimate into a patient-friendly summary.
+
+{_SAFETY_RULES}
+
 Content requirements per section:
-- "What we found": state the estimated chance and include the exact whole-number
-  percentage from the input (e.g. "about 42%"). Make clear it is a statistical
-  estimate, not a prediction of what will happen to this person.
+- "What we found": state the estimated chance and the exact whole-number
+  percentage; make clear it is a statistical estimate, not a prediction.
 - "What may be contributing": describe the listed contributing factors in plain
   language as associations the model noticed, not proven causes.
 - "What this means": give calm, balanced context; reflect the confidence level.
@@ -71,23 +83,38 @@ Content requirements per section:
 - "When to seek care urgently": general, widely-recognised warning signs only —
   not tailored to this individual's estimate.
 
-Avoid these phrasings entirely: "you have", "you will", "you are going to",
-"diagnosed with", "is certain", "guaranteed", "you must take", "stop taking",
-"no need to see".
-
 Return exactly the five sections defined by the output schema. Each value is a
 short, readable paragraph (the urgent-care section may use a short list)."""
+
+# Free mode: one cohesive narrative, no fixed sections, no JSON schema.
+_SYSTEM_PROMPT_FREE = f"""You are a careful health-information assistant. You translate a
+machine-learning model's risk estimate into a patient-friendly summary.
+
+{_SAFETY_RULES}
+
+Write a single, cohesive, free-form summary in plain language (a few short
+paragraphs). Do not use a fixed template or rigid section headings. Naturally
+cover: what the model estimated (with the exact percentage), what factors are
+associated with it (as associations, not causes), what it does and does not
+mean, sensible next steps to discuss with a clinician, and general warning signs
+that warrant urgent care. Keep it calm, non-diagnostic, and grounded only in the
+provided input. Return plain text only — no JSON, no code fences."""
 
 
 class SummaryBackendError(RuntimeError):
     """Raised when the LLM backend cannot be constructed or invoked."""
 
 
-def _user_prompt(profile: RiskProfile) -> str:
+def _user_prompt(profile: RiskProfile, use_template: bool) -> str:
     payload = json.dumps(profile.to_dict(), indent=2, default=str)
+    ask = (
+        "Produce the five-section summary"
+        if use_template
+        else "Produce a single free-form summary"
+    )
     return (
-        "Here is the structured risk profile. Produce the five-section summary, "
-        "faithful to these numbers and factors only:\n\n" + payload
+        f"Here is the structured risk profile. {ask}, faithful to these numbers "
+        f"and factors only:\n\n" + payload
     )
 
 
@@ -103,7 +130,7 @@ def _parse_sections(text: str) -> dict[str, str]:
 
 class _BaseLLMBackend:
     """Shared scaffolding. Subclasses set ``provider``/``default_model`` and
-    implement :meth:`_make_client` and :meth:`generate`."""
+    implement :meth:`_make_client`, :meth:`_complete`, and :meth:`_schema`."""
 
     name = "llm"
     provider = "base"
@@ -117,8 +144,29 @@ class _BaseLLMBackend:
     def _make_client(self):  # pragma: no cover - abstract
         raise NotImplementedError
 
-    def generate(self, profile: RiskProfile) -> dict[str, str]:  # pragma: no cover - abstract
+    def _schema(self):  # pragma: no cover - abstract
         raise NotImplementedError
+
+    def _complete(self, system: str, user: str, schema) -> str:  # pragma: no cover - abstract
+        """Run one completion. ``schema=None`` requests free-form text;
+        otherwise JSON constrained to ``schema``. Returns the raw text."""
+        raise NotImplementedError
+
+    def generate(self, profile: RiskProfile, use_template: bool = True) -> dict[str, str]:
+        """Return the summary as a dict.
+
+        * template mode -> ``{section: text}`` for the five fixed sections.
+        * free mode     -> ``{"Summary": text}`` with one free-form narrative.
+        """
+        if use_template:
+            text = self._complete(
+                _SYSTEM_PROMPT, _user_prompt(profile, True), self._schema()
+            )
+            return _parse_sections(text)
+        text = self._complete(_SYSTEM_PROMPT_FREE, _user_prompt(profile, False), None)
+        if not text or not text.strip():
+            raise SummaryBackendError("Model returned no text content.")
+        return {"Summary": text.strip()}
 
 
 # --------------------------------------------------------------------------- #
@@ -144,20 +192,25 @@ class GeminiBackend(_BaseLLMBackend):
             )
         return genai.Client(api_key=api_key)
 
-    def generate(self, profile: RiskProfile) -> dict[str, str]:
+    def _schema(self):
+        return _GEMINI_SCHEMA
+
+    def _complete(self, system: str, user: str, schema) -> str:
         from google.genai import types
 
+        config_kwargs = dict(
+            system_instruction=system,
+            max_output_tokens=self.max_tokens,
+            temperature=0.3,
+        )
+        if schema is not None:
+            config_kwargs["response_mime_type"] = "application/json"
+            config_kwargs["response_schema"] = schema
         try:
             response = self._client.models.generate_content(
                 model=self.model,
-                contents=_user_prompt(profile),
-                config=types.GenerateContentConfig(
-                    system_instruction=_SYSTEM_PROMPT,
-                    max_output_tokens=self.max_tokens,
-                    temperature=0.3,
-                    response_mime_type="application/json",
-                    response_schema=_GEMINI_SCHEMA,
-                ),
+                contents=user,
+                config=types.GenerateContentConfig(**config_kwargs),
             )
         except Exception as exc:  # google.genai raises various error types
             raise SummaryBackendError(f"Gemini API call failed: {exc}") from exc
@@ -169,7 +222,7 @@ class GeminiBackend(_BaseLLMBackend):
                 getattr(usage, "prompt_token_count", "?"),
                 getattr(usage, "candidates_token_count", "?"),
             )
-        return _parse_sections(getattr(response, "text", "") or "")
+        return getattr(response, "text", "") or ""
 
 
 # --------------------------------------------------------------------------- #
@@ -194,22 +247,27 @@ class AnthropicBackend(_BaseLLMBackend):
             )
         return anthropic.Anthropic()
 
-    def generate(self, profile: RiskProfile) -> dict[str, str]:
+    def _schema(self):
+        return _OUTPUT_SCHEMA
+
+    def _complete(self, system: str, user: str, schema) -> str:
         import anthropic
 
+        kwargs = dict(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            thinking={"type": "adaptive"},
+            system=[{
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{"role": "user", "content": user}],
+        )
+        if schema is not None:
+            kwargs["output_config"] = {"format": {"type": "json_schema", "schema": schema}}
         try:
-            message = self._client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                thinking={"type": "adaptive"},
-                system=[{
-                    "type": "text",
-                    "text": _SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }],
-                output_config={"format": {"type": "json_schema", "schema": _OUTPUT_SCHEMA}},
-                messages=[{"role": "user", "content": _user_prompt(profile)}],
-            )
+            message = self._client.messages.create(**kwargs)
         except anthropic.APIError as exc:
             raise SummaryBackendError(f"Anthropic API call failed: {exc}") from exc
 
@@ -224,8 +282,7 @@ class AnthropicBackend(_BaseLLMBackend):
                 getattr(usage, "cache_read_input_tokens", "?"),
                 getattr(usage, "output_tokens", "?"),
             )
-        text = next((b.text for b in message.content if getattr(b, "type", "") == "text"), "")
-        return _parse_sections(text)
+        return next((b.text for b in message.content if getattr(b, "type", "") == "text"), "")
 
 
 # --------------------------------------------------------------------------- #
@@ -250,26 +307,27 @@ class OpenAIBackend(_BaseLLMBackend):
             )
         return OpenAI()
 
-    def generate(self, profile: RiskProfile) -> dict[str, str]:
+    def _schema(self):
+        return _OUTPUT_SCHEMA
+
+    def _complete(self, system: str, user: str, schema) -> str:
         from openai import OpenAIError
 
+        kwargs = dict(
+            model=self.model,
+            max_completion_tokens=self.max_tokens,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        if schema is not None:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "patient_summary", "schema": schema, "strict": True},
+            }
         try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                max_completion_tokens=self.max_tokens,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": _user_prompt(profile)},
-                ],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "patient_summary",
-                        "schema": _OUTPUT_SCHEMA,
-                        "strict": True,
-                    },
-                },
-            )
+            response = self._client.chat.completions.create(**kwargs)
         except OpenAIError as exc:
             raise SummaryBackendError(f"OpenAI API call failed: {exc}") from exc
 
@@ -283,7 +341,7 @@ class OpenAIBackend(_BaseLLMBackend):
         choice = response.choices[0]
         if getattr(choice, "finish_reason", None) == "content_filter":
             raise SummaryBackendError("The model refused to generate this summary.")
-        return _parse_sections(choice.message.content or "")
+        return choice.message.content or ""
 
 
 _PROVIDERS = {

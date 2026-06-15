@@ -7,7 +7,6 @@ The package is split into decoupled layers:
 * ``explain`` - attributions, concept mapping, and the ``RiskProfile`` contract.
 * ``agent``   - turns a ``RiskProfile`` into a patient-friendly ``PatientSummary``.
 * ``eval``    - predictive metrics + pragmatic summary-quality checks.
-* ``api``     - FastAPI service exposing the summary endpoint.
 
 The predictive model and the agent communicate *only* through ``RiskProfile``,
 so the model can be swapped (XGBoost -> MOTOR-T -> a foundation model) without

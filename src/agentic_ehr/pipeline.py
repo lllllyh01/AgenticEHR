@@ -108,9 +108,11 @@ class InferenceService:
             top_k=self.top_k,
         )
 
-    def summary_for(self, patient_id: str) -> tuple[RiskProfile, PatientSummary]:
+    def summary_for(
+        self, patient_id: str, use_template: bool = True
+    ) -> tuple[RiskProfile, PatientSummary]:
         profile = self.risk_profile_for(patient_id)
-        summary = self.agent.summarize(profile)
+        summary = self.agent.summarize(profile, use_template=use_template)
         return profile, summary
 
     def profile_from_features(self, x_row: pd.DataFrame, snapshot) -> RiskProfile:

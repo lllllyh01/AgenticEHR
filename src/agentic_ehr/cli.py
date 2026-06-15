@@ -1,4 +1,4 @@
-"""Command-line entry point: train / evaluate / demo / serve."""
+"""Command-line entry point: train / evaluate / demo."""
 from __future__ import annotations
 
 import argparse
@@ -69,23 +69,20 @@ def _cmd_demo(args) -> int:
         probs = svc.model.predict_proba(test_split.X)
         patient_id = test_split.records[int(probs.argmax())].patient_id
 
-    profile, summary = svc.summary_for(patient_id)
+    # --no-template switches the LLM from the fixed five-section structured output
+    # to a single free-form narrative.
+    use_template = not args.no_template
+    profile, summary = svc.summary_for(patient_id, use_template=use_template)
 
     print("=" * 72)
     print(f"PATIENT: {patient_id}   |   risk tier: {profile.risk_tier}   "
           f"|   estimate: {profile.probability_pct}%   "
-          f"|   confidence: {profile.confidence_label}")
+          f"|   confidence: {profile.confidence_label}   "
+          f"|   mode: {summary.mode}")
     print("=" * 72)
     print(summary.to_text())
     if summary.guardrail_warnings:
         print("\n[guardrail warnings]", summary.guardrail_warnings, file=sys.stderr)
-    return 0
-
-
-def _cmd_serve(args) -> int:
-    import uvicorn
-
-    uvicorn.run("agentic_ehr.api.app:app", host=args.host, port=args.port, reload=False)
     return 0
 
 
@@ -105,12 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
     d = sub.add_parser("demo", help="Generate a patient-facing summary.")
     d.add_argument("--model", default=None)
     d.add_argument("--patient-id", default=None)
+    d.add_argument(
+        "--no-template",
+        action="store_true",
+        help="Generate a free-form summary instead of the fixed five-section template.",
+    )
     d.set_defaults(func=_cmd_demo)
 
-    s = sub.add_parser("serve", help="Run the FastAPI service.")
-    s.add_argument("--host", default="127.0.0.1")
-    s.add_argument("--port", type=int, default=8000)
-    s.set_defaults(func=_cmd_serve)
     return p
 
 

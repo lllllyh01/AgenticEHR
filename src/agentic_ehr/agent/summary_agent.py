@@ -36,20 +36,24 @@ class PatientSummary:
     backend: str
     risk_tier: str
     probability_pct: int
+    mode: str = "template"  # "template" (five fixed sections) | "free" (narrative)
     guardrail_warnings: list[str] = field(default_factory=list)
 
     def to_text(self) -> str:
-        parts = []
-        for sec in T.SECTIONS:
-            parts.append(f"## {sec}\n{self.sections.get(sec, '').strip()}")
-        parts.append(f"---\n_{self.disclaimer}_")
-        return "\n\n".join(parts)
+        if self.mode == "free":
+            body = self.sections.get("Summary", "").strip()
+        else:
+            body = "\n\n".join(
+                f"## {sec}\n{self.sections.get(sec, '').strip()}" for sec in T.SECTIONS
+            )
+        return f"{body}\n\n---\n_{self.disclaimer}_"
 
     def to_dict(self) -> dict:
         return {
             "sections": self.sections,
             "disclaimer": self.disclaimer,
             "backend": self.backend,
+            "mode": self.mode,
             "risk_tier": self.risk_tier,
             "probability_pct": self.probability_pct,
             "guardrail_warnings": self.guardrail_warnings,
@@ -76,14 +80,16 @@ class SummaryAgent:
         )
         return cls(backend)
 
-    def summarize(self, profile: RiskProfile) -> PatientSummary:
+    def summarize(self, profile: RiskProfile, use_template: bool = True) -> PatientSummary:
         """Generate a summary. Raises on backend failure or guardrail violation.
 
-        No fallback: a failure here is surfaced to the caller, never replaced by
-        a silently-substituted summary.
+        ``use_template=True`` produces the five fixed sections (structured
+        output); ``use_template=False`` produces one free-form narrative. The
+        safety guardrails apply in both modes. No fallback: a failure here is
+        surfaced to the caller, never replaced by a silently-substituted summary.
         """
-        sections = self.backend.generate(profile)  # may raise SummaryBackendError
-        warnings = self._validate(sections, profile)
+        sections = self.backend.generate(profile, use_template=use_template)  # may raise
+        warnings = self._validate(sections, profile, use_template)
         if warnings:
             logger.error("Guardrail violations from %s backend: %s", self.backend.name, warnings)
             raise SummaryGuardrailError(warnings)
@@ -94,27 +100,35 @@ class SummaryAgent:
             backend=self.backend.name,
             risk_tier=profile.risk_tier,
             probability_pct=profile.probability_pct,
+            mode="template" if use_template else "free",
             guardrail_warnings=[],
         )
 
     # ----- guardrails --------------------------------------------------------
-    def _validate(self, sections: dict[str, str], profile: RiskProfile) -> list[str]:
+    def _validate(
+        self, sections: dict[str, str], profile: RiskProfile, use_template: bool = True
+    ) -> list[str]:
         warnings: list[str] = []
-
-        for sec in T.SECTIONS:
-            if not sections.get(sec, "").strip():
-                warnings.append(f"missing or empty section: '{sec}'")
-
         blob = " ".join(sections.values()).lower()
+        pct = str(profile.probability_pct)
+
+        if use_template:
+            for sec in T.SECTIONS:
+                if not sections.get(sec, "").strip():
+                    warnings.append(f"missing or empty section: '{sec}'")
+            # Faithfulness: the stated percentage must appear in "What we found".
+            if pct not in sections.get("What we found", ""):
+                warnings.append("probability not faithfully stated in 'What we found'")
+        else:
+            if not blob.strip():
+                warnings.append("empty summary")
+            # Faithfulness: the stated percentage must appear somewhere.
+            if pct not in " ".join(sections.values()):
+                warnings.append("probability not faithfully stated in summary")
+
         for phrase in T.BANNED_PHRASES:
             if phrase in blob:
                 warnings.append(f"overclaiming/diagnostic phrase detected: '{phrase.strip()}'")
-
-        # Faithfulness: the stated percentage must match the profile.
-        pct = str(profile.probability_pct)
-        found_section = sections.get("What we found", "")
-        if pct not in found_section:
-            warnings.append("probability not faithfully stated in 'What we found'")
 
         # Uncertainty must be acknowledged when confidence is lower.
         if profile.confidence_label == "lower" and "caution" not in blob and "less certain" not in blob:
