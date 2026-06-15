@@ -21,7 +21,6 @@ def _cmd_train(args) -> int:
 
 
 def _cmd_evaluate(args) -> int:
-    from .data.dataset import EHRDataset
     from .eval.model_eval import evaluate_predictions
     from .eval.summary_eval import evaluate_summary
     from .pipeline import InferenceService

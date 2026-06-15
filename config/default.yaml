@@ -19,10 +19,10 @@ data:
     max_features: 200         # keep the most frequent codes
 
 task:
-  name: "12_month_hospitalization"
-  description: "Risk of unplanned hospitalization within 12 months"
-  positive_label: "hospitalization within 12 months"
-  horizon: "the next 12 months"
+  name: "synthetic_composite_health_risk"
+  description: "Illustrative composite health-risk score driven by chronic-disease burden (synthetic demo label, not a validated clinical endpoint)"
+  positive_label: "an elevated overall health risk"
+  horizon: "the near future"
 
 model:
   name: xgboost
@@ -57,7 +57,7 @@ agent:
     #   claude -> ANTHROPIC_API_KEY
     #   openai -> OPENAI_API_KEY
     provider: gemini          # one of: gemini | claude | openai
-    model: gemini-3.5-flash               # null -> the provider's best default
+    model: gemini-3.1-flash-lite               # null -> the provider's best default
                               #   gemini: gemini-2.5-pro
                               #   claude: claude-opus-4-8
                               #   openai: gpt-4o
