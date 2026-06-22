@@ -1,4 +1,4 @@
-"""XGBoost baseline implementing the :class:`RiskModel` interface.
+"""XGBoost classification baseline implementing the :class:`BaseModel` interface.
 
 Includes optional probability calibration (isotonic/sigmoid) fitted on a
 held-out split, and a simple per-patient uncertainty estimate derived from the
@@ -17,12 +17,12 @@ from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 
 from ..logging_utils import get_logger
-from .base import ModelOutput, RiskModel
+from .base import BaseModel, ModelOutput
 
 logger = get_logger(__name__)
 
 
-class XGBoostRiskModel(RiskModel):
+class XGBoostClassifierModel(BaseModel):
     name = "xgboost"
 
     def __init__(self, params: dict | None = None, calibrate: bool = True,
@@ -35,7 +35,7 @@ class XGBoostRiskModel(RiskModel):
         self._calibrator = None
 
     # ----- training ----------------------------------------------------------
-    def fit(self, X: pd.DataFrame, y: np.ndarray, X_val=None, y_val=None) -> "XGBoostRiskModel":
+    def fit(self, X: pd.DataFrame, y: np.ndarray, X_val=None, y_val=None) -> "XGBoostClassifierModel":
         self._feature_names = list(X.columns)
         self.model_ = XGBClassifier(
             objective="binary:logistic",
@@ -95,13 +95,8 @@ class XGBoostRiskModel(RiskModel):
         boundary = 1.0 - np.abs(prob - 0.5) * 2.0  # 1 at p=0.5, 0 at p in {0,1}
 
         try:
-            # Per-tree margin spread via staged log-odds.
-            margins = self.model_.predict(arr, output_margin=True)  # final margin
-            # Approximate spread using leaf-value std across trees.
             booster = self.model_.get_booster()
             leaf = booster.predict(_to_dmatrix(arr), pred_leaf=True)
-            # Variance across trees of the per-row leaf index is a rough proxy;
-            # normalise to [0,1] via a squashing function.
             spread = leaf.std(axis=1)
             spread = spread / (spread.max() + 1e-9)
         except Exception:  # pragma: no cover - defensive
@@ -140,7 +135,7 @@ class XGBoostRiskModel(RiskModel):
         logger.info("Saved XGBoost model to %s", path)
 
     @classmethod
-    def load(cls, path: str) -> "XGBoostRiskModel":
+    def load(cls, path: str) -> "XGBoostClassifierModel":
         blob = joblib.load(path)
         obj = cls(
             params=blob["params"],

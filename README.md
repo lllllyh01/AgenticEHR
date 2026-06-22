@@ -32,7 +32,7 @@ are two output modes (the same safety guardrails apply to both):
 structured EHR events
         │  data/  (ingest → CountFeaturizer → EHRDataset)
         ▼
-  feature matrix X ───────────────► models/  RiskModel (XGBoost baseline)
+  feature matrix X ───────────────► models/  BaseModel (XGBoost baselines)
         │                                  │  calibrated proba + uncertainty
         │                                  ▼
         │                          explain/  Attributor (SHAP / fallback)
@@ -55,7 +55,7 @@ a standing disclaimer.
 | Module        | Responsibility                                                                            |
 | ------------- | ----------------------------------------------------------------------------------------- |
 | `data/`       | Schema, synthetic generator, FEMR/EHR-shot loader, `CountFeaturizer`, `EHRDataset`        |
-| `models/`     | `RiskModel` ABC, `XGBoostRiskModel` (calibration, save/load), registry                    |
+| `models/`     | `BaseModel` ABC, `XGBoostClassifierModel` (+ regression) (calibration, save/load), registry                    |
 | `explain/`    | `Attributor` (SHAP + fallback), `ConceptMap`, **`RiskProfile`** contract                  |
 | `agent/`      | `SummaryAgent` (LLM-only, no-fallback), provider backends (Gemini/Claude/GPT), guardrails |
 | `eval/`       | Predictive metrics (AUROC/AUPRC/Brier/ECE) + summary-quality checks                       |
@@ -176,14 +176,14 @@ Extend the plain-language `ConceptMap` for a new vocabulary via
 
 The agent depends on `RiskProfile`, **not** on XGBoost. To plug in a new model:
 
-1. Implement the `RiskModel` interface (`src/agentic_ehr/models/base.py`):
+1. Implement the `BaseModel` interface (`src/agentic_ehr/models/base.py`):
    `fit`, `predict_proba`, `predict_output` (returns `ModelOutput` with a
    probability + uncertainty), `feature_importance`, `feature_names`,
    `save`/`load`.
 2. Register it:
    ```python
    from agentic_ehr.models.registry import register_model
-   register_model("<new_model_name>", MotorTRiskModel)
+   register_model("<new_model_name>", MotorTModel)
    ```
 3. Set `model.name: new_model_name` in the config and add a loader branch in
    `pipeline._load_model`.

@@ -1,9 +1,8 @@
 """XGBoost regression model for continuous targets (e.g. length of stay).
 
-Mirrors :class:`XGBoostRiskModel` for the methods the multi-task trainer,
-attributor, and service need (fit / predict / predict_output / feature_importance
-/ sklearn_model / save / load), but predicts a continuous ``point_estimate`` with
-no probability calibration.
+The regression counterpart to :class:`XGBoostClassifierModel`. Implements the
+same :class:`BaseModel` interface, but predicts a continuous ``point_estimate``
+with no probability or calibration.
 """
 from __future__ import annotations
 
@@ -15,12 +14,12 @@ import pandas as pd
 from xgboost import XGBRegressor
 
 from ..logging_utils import get_logger
-from .base import ModelOutput
+from .base import BaseModel, ModelOutput
 
 logger = get_logger(__name__)
 
 
-class XGBoostRegressionModel:
+class XGBoostRegressionModel(BaseModel):
     name = "xgboost_regression"
 
     def __init__(self, params: dict | None = None):
@@ -29,6 +28,7 @@ class XGBoostRegressionModel:
         self._feature_names: list[str] = []
 
     def fit(self, X: pd.DataFrame, y: np.ndarray, X_val=None, y_val=None) -> "XGBoostRegressionModel":
+        # X_val / y_val are accepted for BaseModel parity (no early stopping here).
         self._feature_names = list(X.columns)
         self.model_ = XGBRegressor(objective="reg:squarederror", tree_method="hist", **self.params)
         self.model_.fit(X.values, np.asarray(y, dtype=float))

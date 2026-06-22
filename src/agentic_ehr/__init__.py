@@ -3,7 +3,7 @@
 The package is split into decoupled layers:
 
 * ``data``    - ingest structured longitudinal EHR, featurize, dataset abstraction.
-* ``models``  - pluggable ``RiskModel`` interface + XGBoost baseline.
+* ``models``  - pluggable ``BaseModel`` interface + XGBoost baseline.
 * ``explain`` - attributions, concept mapping, and the ``RiskProfile`` contract.
 * ``agent``   - turns a ``RiskProfile`` into a patient-friendly ``PatientSummary``.
 * ``eval``    - predictive metrics + pragmatic summary-quality checks.

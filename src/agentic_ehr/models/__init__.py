@@ -1,12 +1,14 @@
-"""Pluggable risk-model interface and the XGBoost baseline."""
-from .base import RiskModel, ModelOutput
-from .xgboost_model import XGBoostRiskModel
+"""Pluggable predictive-model interface and the XGBoost baselines."""
+from .base import BaseModel, ModelOutput
+from .xgboost_classifier import XGBoostClassifierModel
+from .xgboost_regression import XGBoostRegressionModel
 from .registry import get_model, register_model, available_models
 
 __all__ = [
-    "RiskModel",
+    "BaseModel",
     "ModelOutput",
-    "XGBoostRiskModel",
+    "XGBoostClassifierModel",
+    "XGBoostRegressionModel",
     "get_model",
     "register_model",
     "available_models",

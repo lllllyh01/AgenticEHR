@@ -17,7 +17,7 @@ from .explain.attributions import Attributor
 from .explain.concept_map import ConceptMap
 from .explain.risk_profile import RiskProfile, RiskProfileBuilder
 from .logging_utils import get_logger
-from .models.base import RiskModel
+from .models.base import BaseModel
 from .models.registry import build_from_config
 
 logger = get_logger(__name__)
@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class TrainResult:
-    model: RiskModel
+    model: BaseModel
     model_path: str
     metrics: dict
 
@@ -63,7 +63,7 @@ class InferenceService:
     def __init__(
         self,
         cfg: Config,
-        model: RiskModel,
+        model: BaseModel,
         dataset: EHRDataset,
         agent: SummaryAgent | None = None,
     ):
@@ -125,16 +125,16 @@ class InferenceService:
         )
 
 
-def _load_model(cfg: Config, model_path: str) -> RiskModel:
+def _load_model(cfg: Config, model_path: str) -> BaseModel:
     name = cfg.get("model.name", "xgboost")
     if name == "xgboost":
-        from .models.xgboost_model import XGBoostRiskModel
+        from .models.xgboost_classifier import XGBoostClassifierModel
 
         if not Path(model_path).exists():
             raise FileNotFoundError(
                 f"No trained model at {model_path}. Run `agentic-ehr train` first."
             )
-        return XGBoostRiskModel.load(model_path)
+        return XGBoostClassifierModel.load(model_path)
     raise NotImplementedError(
         f"Loading for model '{name}' is not wired up. Add a loader in pipeline._load_model."
     )

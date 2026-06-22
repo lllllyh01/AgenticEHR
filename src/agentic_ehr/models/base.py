@@ -1,8 +1,10 @@
 """The model interface every predictive model must implement.
 
 The agent never imports this module — it only ever sees a ``RiskProfile``. This
-ABC is the contract for *training/serving* a model. To plug in MOTOR-T or a
-foundation model later, implement this interface (see README) and register it.
+ABC is the contract for *training/serving* a model, for both classification
+(``XGBoostClassifierModel``) and regression (``XGBoostRegressionModel``). To plug
+in MOTOR-T or a foundation model later, implement this interface (see README) and
+register it.
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ import pandas as pd
 class ModelOutput:
     """Per-patient model output.
 
-    ``probability``        calibrated probability of the positive outcome.
+    ``probability``        calibrated probability of the positive outcome (classification).
     ``raw_probability``    pre-calibration probability (for diagnostics).
     ``uncertainty``        scalar in [0, 1]; higher = less confident.
     """
@@ -28,22 +30,22 @@ class ModelOutput:
     extra: dict = field(default_factory=dict)
 
 
-class RiskModel(ABC):
-    """Abstract pluggable risk model."""
+class BaseModel(ABC):
+    """Abstract pluggable predictive model (classification or regression)."""
 
     name: str = "base"
 
     @abstractmethod
-    def fit(self, X: pd.DataFrame, y: np.ndarray, X_val=None, y_val=None) -> "RiskModel":
+    def fit(self, X: pd.DataFrame, y: np.ndarray, X_val=None, y_val=None) -> "BaseModel":
         ...
 
     @abstractmethod
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        """Return calibrated positive-class probabilities, shape (n,)."""
-
-    @abstractmethod
     def predict_output(self, X: pd.DataFrame) -> list[ModelOutput]:
-        """Return rich per-row :class:`ModelOutput` (proba + uncertainty)."""
+        """Return rich per-row :class:`ModelOutput`."""
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Calibrated positive-class probabilities (classification models only)."""
+        raise NotImplementedError(f"{type(self).__name__} does not support predict_proba.")
 
     @abstractmethod
     def feature_importance(self) -> dict[str, float]:
@@ -60,5 +62,5 @@ class RiskModel(ABC):
 
     @classmethod
     @abstractmethod
-    def load(cls, path: str) -> "RiskModel":
+    def load(cls, path: str) -> "BaseModel":
         ...

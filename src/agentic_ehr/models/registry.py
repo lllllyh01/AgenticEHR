@@ -7,17 +7,17 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .base import RiskModel
-from .xgboost_model import XGBoostRiskModel
+from .base import BaseModel
+from .xgboost_classifier import XGBoostClassifierModel
 
-_REGISTRY: dict[str, Callable[..., RiskModel]] = {}
+_REGISTRY: dict[str, Callable[..., BaseModel]] = {}
 
 
-def register_model(name: str, factory: Callable[..., RiskModel]) -> None:
+def register_model(name: str, factory: Callable[..., BaseModel]) -> None:
     _REGISTRY[name] = factory
 
 
-def get_model(name: str, **kwargs) -> RiskModel:
+def get_model(name: str, **kwargs) -> BaseModel:
     if name not in _REGISTRY:
         raise KeyError(f"Unknown model {name!r}. Available: {available_models()}")
     return _REGISTRY[name](**kwargs)
@@ -27,7 +27,7 @@ def available_models() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def build_from_config(cfg) -> RiskModel:
+def build_from_config(cfg) -> BaseModel:
     name = cfg.get("model.name", "xgboost")
     if name == "xgboost":
         return get_model(
@@ -39,4 +39,4 @@ def build_from_config(cfg) -> RiskModel:
     return get_model(name)
 
 
-register_model("xgboost", XGBoostRiskModel)
+register_model("xgboost", XGBoostClassifierModel)
