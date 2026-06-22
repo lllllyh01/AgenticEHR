@@ -65,9 +65,10 @@ class TaskPrediction:
     risk_tier: str
     uncertainty: float
     confidence_label: str
-    auroc: float                       # held-out test AUROC of this task's model
+    auroc: float                       # held-out test AUROC (binary) of this task's model
     contributors: list[ContributorView]
     protective_factors: list[ContributorView]
+    point_estimate: float | None = None  # continuous prediction for regression tasks
 
     @property
     def probability_pct(self) -> int:

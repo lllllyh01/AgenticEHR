@@ -121,7 +121,8 @@ REPORT_SYSTEM_PROMPT = f"""You are a careful health-information assistant. You t
 machine-learning model's prediction panel into a patient-friendly health summary.
 
 The input has "forward_risks" (estimated chances of future outcomes, each with a
-percentage, confidence, and horizon) and "chronic_profile" (estimated
+percentage, confidence, and horizon), "expected_outcomes" (continuous estimates
+such as expected length of stay in days), and "chronic_profile" (estimated
 likelihoods that the patient already has each chronic condition).
 
 {_SAFETY_RULES}

@@ -102,6 +102,9 @@ def _cmd_demo(args) -> int:
     print(summary.to_text())
     if summary.guardrail_warnings:
         print("\n[guardrail warnings]", summary.guardrail_warnings, file=sys.stderr)
+    feats = svc.dataset.features_for(patient_id).iloc[0].to_dict() if args.save_response else None
+    _maybe_save_response(args, patient_id, profile, summary,
+                         model_info={"model_path": args.model}, features=feats)
     return 0
 
 
@@ -120,7 +123,10 @@ def _demo_mimic(args, cfg) -> int:
     print("=" * 72)
     print("FORWARD RISK PANEL:")
     for t in profile.forward:
-        print(f"  {t.label:24s} {t.probability_pct:3d}%  ({t.confidence_label} confidence, AUROC {t.auroc:.2f})")
+        if t.kind == "regression":
+            print(f"  {t.label:24s} ~{t.point_estimate:.1f} days  ({t.confidence_label} confidence)")
+        else:
+            print(f"  {t.label:24s} {t.probability_pct:3d}%  ({t.confidence_label} confidence, AUROC {t.auroc:.2f})")
     print("CHRONIC PHENOTYPE PANEL:")
     for t in profile.chronic:
         print(f"  {t.label:48s} {t.probability_pct:3d}%")
@@ -130,7 +136,21 @@ def _demo_mimic(args, cfg) -> int:
     print(report.to_text())
     if report.guardrail_warnings:
         print("\n[guardrail warnings]", report.guardrail_warnings, file=sys.stderr)
+    _maybe_save_response(args, patient_id, profile, report,
+                         model_info={"model_dir": args.model or cfg.get("paths.model_dir")},
+                         features=svc.features_for(patient_id) if args.save_response else None)
     return 0
+
+
+def _maybe_save_response(args, patient_id, profile, summary, *, model_info, features) -> None:
+    if not getattr(args, "save_response", None):
+        return
+    from .eval.response_log import build_record, write_record
+
+    formats = tuple(f.strip() for f in (args.response_format or "json,md").split(","))
+    record = build_record(patient_id, profile, summary, model_info=model_info, features=features)
+    paths = write_record(record, args.save_response, formats=formats)
+    print(f"\n[saved response] {', '.join(paths)}", file=sys.stderr)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -154,6 +174,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Generate a free-form summary instead of the fixed five-section template.",
     )
+    d.add_argument("--save-response", default=None, metavar="DIR",
+                   help="Write the prediction metadata + report to DIR for review.")
+    d.add_argument("--response-format", default="json,md",
+                   help="Comma-separated formats to save: json,md,txt (default: json,md).")
     d.set_defaults(func=_cmd_demo)
 
     return p
