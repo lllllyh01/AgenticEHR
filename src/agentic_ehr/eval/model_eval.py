@@ -1,4 +1,4 @@
-"""Predictive-performance metrics appropriate for binary EHR risk tasks."""
+"""Predictive-performance metrics for binary and regression EHR tasks."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -7,6 +7,8 @@ import numpy as np
 from sklearn.metrics import (
     average_precision_score,
     brier_score_loss,
+    mean_absolute_error,
+    r2_score,
     roc_auc_score,
 )
 
@@ -22,6 +24,26 @@ class ModelMetrics:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass
+class RegressionMetrics:
+    n: int
+    mae: float
+    rmse: float
+    r2: float
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def evaluate_regression(y_true: np.ndarray, y_pred: np.ndarray) -> RegressionMetrics:
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    mae = float(mean_absolute_error(y_true, y_pred))
+    rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+    r2 = float(r2_score(y_true, y_pred)) if len(y_true) > 1 else float("nan")
+    return RegressionMetrics(n=len(y_true), mae=mae, rmse=rmse, r2=r2)
 
 
 def evaluate_predictions(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> ModelMetrics:

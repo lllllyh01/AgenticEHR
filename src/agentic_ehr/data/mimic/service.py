@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pandas as pd
+
 from ...config import Config
 from ...explain.attributions import Attributor
 from ...explain.concept_map import Concept, ConceptMap
@@ -81,21 +83,26 @@ class MultiTaskInferenceService:
         chronic: list[TaskPrediction] = []
         method = "approx"
         for name, tm in self.model.task_models.items():
-            out = tm.model.predict_output(x_full[tm.columns])[0]
-            task_meta = SimpleNamespace(
-                name=tm.spec.name, description=tm.spec.label,
-                positive_label=tm.spec.positive_label, horizon=tm.spec.horizon,
-            )
-            rp = self.builders[name].build(out, x_full[tm.columns], snapshot, task_meta, self.top_k)
-            method = rp.attribution_method
-            tp = TaskPrediction(
-                name=tm.spec.name, label=tm.spec.label, group=tm.spec.group, kind=tm.spec.kind,
-                positive_label=tm.spec.positive_label, horizon=tm.spec.horizon,
-                probability=rp.probability, raw_probability=rp.raw_probability,
-                risk_tier=rp.risk_tier, uncertainty=rp.uncertainty,
-                confidence_label=rp.confidence_label, auroc=float(tm.metrics.get("auroc", 0.0)),
-                contributors=rp.contributors, protective_factors=rp.protective_factors,
-            )
+            x_cols = x_full[tm.columns]
+            out = tm.model.predict_output(x_cols)[0]
+            builder = self.builders[name]
+            method = builder.attributor.method
+            if tm.spec.kind == "regression":
+                tp = self._regression_prediction(tm, out, x_cols, builder)
+            else:
+                task_meta = SimpleNamespace(
+                    name=tm.spec.name, description=tm.spec.label,
+                    positive_label=tm.spec.positive_label, horizon=tm.spec.horizon,
+                )
+                rp = builder.build(out, x_cols, snapshot, task_meta, self.top_k)
+                tp = TaskPrediction(
+                    name=tm.spec.name, label=tm.spec.label, group=tm.spec.group, kind=tm.spec.kind,
+                    positive_label=tm.spec.positive_label, horizon=tm.spec.horizon,
+                    probability=rp.probability, raw_probability=rp.raw_probability,
+                    risk_tier=rp.risk_tier, uncertainty=rp.uncertainty,
+                    confidence_label=rp.confidence_label, auroc=float(tm.metrics.get("auroc", 0.0)),
+                    contributors=rp.contributors, protective_factors=rp.protective_factors,
+                )
             (forward if tm.spec.group == "forward" else chronic).append(tp)
 
         forward.sort(key=lambda t: t.probability, reverse=True)
@@ -107,6 +114,26 @@ class MultiTaskInferenceService:
             attribution_method=method,
             notes=[],
         )
+
+    def _regression_prediction(self, tm, out, x_cols, builder) -> TaskPrediction:
+        contribs = builder.attributor.explain(x_cols, self.top_k)
+        max_mag = max((abs(c.signed_impact) for c in contribs), default=1.0) or 1.0
+        views_up = [builder._to_view(c, max_mag) for c in contribs if c.signed_impact > 0]
+        views_down = [builder._to_view(c, max_mag) for c in contribs if c.signed_impact < 0]
+        return TaskPrediction(
+            name=tm.spec.name, label=tm.spec.label, group=tm.spec.group, kind="regression",
+            positive_label=tm.spec.positive_label, horizon=tm.spec.horizon,
+            probability=0.0, raw_probability=0.0, risk_tier="n/a",
+            uncertainty=float(out.uncertainty),
+            confidence_label=RiskProfileBuilder._confidence_label(out.uncertainty),
+            auroc=0.0, contributors=views_up, protective_factors=views_down,
+            point_estimate=float(out.point_estimate) if out.point_estimate is not None else None,
+        )
+
+    def features_for(self, patient_id: str) -> dict:
+        """The featurized model input for one patient (for response logging)."""
+        row = self.model.featurizer.transform([self.records[str(patient_id)]]).iloc[0]
+        return {k: (None if pd.isna(v) else round(float(v), 4)) for k, v in row.items()}
 
     def any_patient_id(self) -> str:
         return next(iter(self.records))

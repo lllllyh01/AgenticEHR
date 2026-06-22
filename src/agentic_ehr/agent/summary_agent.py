@@ -42,13 +42,19 @@ def _health_payload(profile: HealthRiskProfile) -> dict:
             }
             for t in profile.forward if t.kind == "binary"
         ],
+        "expected_outcomes": [
+            {"outcome": t.label, "estimate": round(t.point_estimate, 1),
+             "confidence": t.confidence_label,
+             "top_factors": [c.patient_phrase for c in t.contributors[:3]]}
+            for t in profile.forward if t.kind == "regression" and t.point_estimate is not None
+        ],
         "chronic_profile": [
             {"condition": t.label, "likelihood_percent": t.probability_pct,
              "confidence": t.confidence_label}
             for t in profile.chronic
         ],
         "recent_snapshot": profile.snapshot,
-        "note": "All percentages are model estimates, not confirmed diagnoses.",
+        "note": "All numbers are model estimates, not confirmed diagnoses.",
     }
 
 

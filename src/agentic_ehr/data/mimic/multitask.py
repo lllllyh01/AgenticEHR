@@ -16,9 +16,11 @@ import numpy as np
 import pandas as pd
 
 from ...config import Config
-from ...eval.model_eval import evaluate_predictions
+from ...eval.model_eval import evaluate_predictions, evaluate_regression
 from ...logging_utils import get_logger
-from ...models.xgboost_model import XGBoostRiskModel
+from ...models.base import BaseModel
+from ...models.xgboost_classifier import XGBoostClassifierModel
+from ...models.xgboost_regression import XGBoostRegressionModel
 from ..dataset import _load_event_label_records
 from ..featurize import CountFeaturizer
 from . import tasks as T
@@ -83,14 +85,23 @@ def train_all(cfg: Config, out_dir: str) -> dict:
     tr, va, te = split_ids(X.index, seed, 0.15, 0.15)
 
     manifest = {"featurizer": FEATURIZER_NAME, "feature_names": list(X.columns), "tasks": {}}
-    for task in T.BINARY_TASKS:
+    for task in T.ALL_TASKS:
         y = _load_y(cfg, task.name, X.index)
         keep = [c for c in X.columns if c not in set(T.excluded_columns(list(X.columns), task))]
         Xb = X[keep]
-        model = XGBoostRiskModel(params=params, calibrate=calibrate, calibration_method=calib_method)
-        model.fit(Xb.iloc[tr], y[tr], X_val=Xb.iloc[va], y_val=y[va])
-        prob = model.predict_proba(Xb.iloc[te])
-        metrics = evaluate_predictions(y[te].astype(int), prob).to_dict()
+        if task.kind == "regression":
+            model = XGBoostRegressionModel(params=params)
+            model.fit(Xb.iloc[tr], y[tr], X_val=Xb.iloc[va], y_val=y[va])
+            metrics = evaluate_regression(y[te], model.predict(Xb.iloc[te])).to_dict()
+            logger.info("  %-22s MAE=%.2f RMSE=%.2f R2=%.3f (n=%d, feats=%d)",
+                        task.name, metrics["mae"], metrics["rmse"], metrics["r2"], metrics["n"], len(keep))
+        else:
+            model = XGBoostClassifierModel(params=params, calibrate=calibrate, calibration_method=calib_method)
+            model.fit(Xb.iloc[tr], y[tr].astype(int), X_val=Xb.iloc[va], y_val=y[va].astype(int))
+            metrics = evaluate_predictions(y[te].astype(int), model.predict_proba(Xb.iloc[te])).to_dict()
+            logger.info("  %-22s AUROC=%.3f AUPRC=%.3f (n=%d, pos=%d, feats=%d)",
+                        task.name, metrics["auroc"], metrics["auprc"], metrics["n"],
+                        int(y[te].sum()), len(keep))
         model_file = f"{task.name}.joblib"
         model.save(str(out / model_file))
         manifest["tasks"][task.name] = {
@@ -98,9 +109,6 @@ def train_all(cfg: Config, out_dir: str) -> dict:
             "label": task.label, "positive_label": task.positive_label, "horizon": task.horizon,
             "metrics": metrics,
         }
-        logger.info("  %-22s AUROC=%.3f AUPRC=%.3f (n=%d, pos=%d, feats=%d)",
-                    task.name, metrics["auroc"], metrics["auprc"], metrics["n"],
-                    int(y[te].sum()), len(keep))
 
     (out / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2))
     logger.info("Saved %d task models + manifest to %s", len(manifest["tasks"]), out)
@@ -113,7 +121,7 @@ def train_all(cfg: Config, out_dir: str) -> dict:
 @dataclass
 class TaskModel:
     spec: T.TaskSpec
-    model: XGBoostRiskModel
+    model: BaseModel
     columns: list[str]
     metrics: dict
 
@@ -132,9 +140,10 @@ class MultiTaskModel:
         featurizer = joblib.load(out / manifest["featurizer"])
         task_models: dict[str, TaskModel] = {}
         for name, info in manifest["tasks"].items():
+            model_cls = XGBoostRegressionModel if info["kind"] == "regression" else XGBoostClassifierModel
             task_models[name] = TaskModel(
                 spec=T.get_task(name),
-                model=XGBoostRiskModel.load(str(out / info["model"])),
+                model=model_cls.load(str(out / info["model"])),
                 columns=info["columns"],
                 metrics=info["metrics"],
             )
