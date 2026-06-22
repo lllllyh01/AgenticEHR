@@ -1,24 +1,55 @@
 """The SummaryAgent: drives an LLM backend and enforces safety guardrails.
 
 The AI (LLM) summary agent is the core of the system — and the only summary
-generator. There is **no fallback**: if the backend cannot run (missing SDK /
-API key, or an API error) or its output fails the safety guardrails, the agent
-RAISES so the failure is surfaced rather than masked. The backend is
-provider-agnostic (Gemini / Claude / GPT); see :mod:`agent.llm_backend`.
+generator. It handles BOTH a single-task :class:`RiskProfile` (one prediction)
+and a multi-label :class:`HealthRiskProfile` (a prediction panel), dispatching on
+the profile type. There is **no fallback**: if the backend cannot run (missing
+SDK / API key, or an API error) or its output fails the safety guardrails, the
+agent RAISES so the failure is surfaced. The backend is provider-agnostic
+(Gemini / Claude / GPT) and pure transport; see :mod:`agent.llm_backend`.
 
 The constructor accepts any object implementing the backend contract
-(``name`` + ``generate(profile)``), which keeps the agent decoupled from the
-provider and lets callers inject an alternative backend (e.g. a test double).
+(``name`` + ``run_sections(system_template, system_free, payload, use_template)``),
+which keeps the agent decoupled from the provider and lets callers inject a test
+double.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..explain.risk_profile import RiskProfile
+from ..explain.risk_profile import HealthRiskProfile, RiskProfile
 from ..logging_utils import get_logger
 from . import templates as T
 
 logger = get_logger(__name__)
+
+
+def _single_payload(profile: RiskProfile) -> dict:
+    return {**profile.to_dict(), "probability_pct": profile.probability_pct}
+
+
+def _health_payload(profile: HealthRiskProfile) -> dict:
+    """Compact, LLM-friendly view of a multi-label prediction panel."""
+    return {
+        "demographics": profile.demographics,
+        "forward_risks": [
+            {
+                "outcome": t.label,
+                "chance_percent": t.probability_pct,
+                "confidence": t.confidence_label,
+                "horizon": t.horizon,
+                "top_factors": [c.patient_phrase for c in t.contributors[:3]],
+            }
+            for t in profile.forward if t.kind == "binary"
+        ],
+        "chronic_profile": [
+            {"condition": t.label, "likelihood_percent": t.probability_pct,
+             "confidence": t.confidence_label}
+            for t in profile.chronic
+        ],
+        "recent_snapshot": profile.snapshot,
+        "note": "All percentages are model estimates, not confirmed diagnoses.",
+    }
 
 
 class SummaryGuardrailError(RuntimeError):
@@ -80,16 +111,32 @@ class SummaryAgent:
         )
         return cls(backend)
 
-    def summarize(self, profile: RiskProfile, use_template: bool = True) -> PatientSummary:
-        """Generate a summary. Raises on backend failure or guardrail violation.
+    def summarize(self, profile, use_template: bool = True) -> PatientSummary:
+        """Generate a summary from a RiskProfile or a HealthRiskProfile.
 
         ``use_template=True`` produces the five fixed sections (structured
         output); ``use_template=False`` produces one free-form narrative. The
         safety guardrails apply in both modes. No fallback: a failure here is
         surfaced to the caller, never replaced by a silently-substituted summary.
         """
-        sections = self.backend.generate(profile, use_template=use_template)  # may raise
-        warnings = self._validate(sections, profile, use_template)
+        if isinstance(profile, HealthRiskProfile):
+            sections = self.backend.run_sections(
+                T.REPORT_SYSTEM_PROMPT, T.REPORT_SYSTEM_PROMPT_FREE,
+                _health_payload(profile), use_template,
+            )
+            warnings = self._validate_health(sections, profile, use_template)
+            top = profile.forward[0] if profile.forward else None
+            risk_tier = top.risk_tier if top else "n/a"
+            probability_pct = top.probability_pct if top else 0
+        else:
+            sections = self.backend.run_sections(
+                T.SINGLE_SYSTEM_PROMPT, T.SINGLE_SYSTEM_PROMPT_FREE,
+                _single_payload(profile), use_template,
+            )
+            warnings = self._validate_single(sections, profile, use_template)
+            risk_tier = profile.risk_tier
+            probability_pct = profile.probability_pct
+
         if warnings:
             logger.error("Guardrail violations from %s backend: %s", self.backend.name, warnings)
             raise SummaryGuardrailError(warnings)
@@ -98,40 +145,45 @@ class SummaryAgent:
             sections=sections,
             disclaimer=T.DISCLAIMER,
             backend=self.backend.name,
-            risk_tier=profile.risk_tier,
-            probability_pct=profile.probability_pct,
+            risk_tier=risk_tier,
+            probability_pct=probability_pct,
             mode="template" if use_template else "free",
             guardrail_warnings=[],
         )
 
     # ----- guardrails --------------------------------------------------------
-    def _validate(
-        self, sections: dict[str, str], profile: RiskProfile, use_template: bool = True
-    ) -> list[str]:
+    def _check_common(self, sections: dict[str, str], use_template: bool) -> tuple[list[str], str]:
+        """Section-completeness + banned-phrase checks shared by both profiles."""
         warnings: list[str] = []
         blob = " ".join(sections.values()).lower()
-        pct = str(profile.probability_pct)
-
         if use_template:
             for sec in T.SECTIONS:
                 if not sections.get(sec, "").strip():
                     warnings.append(f"missing or empty section: '{sec}'")
-            # Faithfulness: the stated percentage must appear in "What we found".
-            if pct not in sections.get("What we found", ""):
-                warnings.append("probability not faithfully stated in 'What we found'")
-        else:
-            if not blob.strip():
-                warnings.append("empty summary")
-            # Faithfulness: the stated percentage must appear somewhere.
-            if pct not in " ".join(sections.values()):
-                warnings.append("probability not faithfully stated in summary")
-
+        elif not blob.strip():
+            warnings.append("empty summary")
         for phrase in T.BANNED_PHRASES:
             if phrase in blob:
                 warnings.append(f"overclaiming/diagnostic phrase detected: '{phrase.strip()}'")
+        return warnings, blob
 
-        # Uncertainty must be acknowledged when confidence is lower.
+    def _validate_single(self, sections, profile: RiskProfile, use_template: bool) -> list[str]:
+        warnings, blob = self._check_common(sections, use_template)
+        pct = str(profile.probability_pct)
+        text = sections.get("What we found", "") if use_template else " ".join(sections.values())
+        if pct not in text:
+            warnings.append("probability not faithfully stated")
         if profile.confidence_label == "lower" and "caution" not in blob and "less certain" not in blob:
             warnings.append("low confidence not reflected in summary")
+        return warnings
 
+    def _validate_health(self, sections, profile: HealthRiskProfile, use_template: bool) -> list[str]:
+        warnings, blob = self._check_common(sections, use_template)
+        if profile.forward:
+            top = profile.forward[0]
+            text = sections.get("What we found", "") if use_template else " ".join(sections.values())
+            if str(top.probability_pct) not in text:
+                warnings.append("top forward-risk percentage not faithfully stated")
+            if top.confidence_label == "lower" and "caution" not in blob and "less certain" not in blob:
+                warnings.append("low confidence not reflected in summary")
         return warnings

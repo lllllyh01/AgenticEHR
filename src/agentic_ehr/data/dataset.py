@@ -49,6 +49,7 @@ class EHRDataset:
         featurizer = CountFeaturizer(
             lookback_days=cfg.get("data.featurize.lookback_days", 365),
             max_features=cfg.get("data.featurize.max_features", 200),
+            numeric_codes=cfg.get("data.featurize.numeric_codes", None),
         )
         if source == "synthetic":
             records = generate_records(
@@ -57,7 +58,15 @@ class EHRDataset:
                 seed=cfg.get("seed", 42),
             )
         elif source == "femr":
-            records = _load_femr_records(cfg)
+            records = _load_event_label_records(
+                cfg.get("data.femr.events_path"), cfg.get("data.femr.labels_path"), "femr"
+            )
+        elif source == "mimic":
+            # MIMIC tables are built offline via `python -m agentic_ehr.data.mimic.build`
+            # into the FEMR-style contract, then loaded here unchanged.
+            records = _load_event_label_records(
+                cfg.get("data.mimic.events_path"), cfg.get("data.mimic.labels_path"), "mimic"
+            )
         else:
             raise ValueError(f"Unknown data.source: {source!r}")
         featurizer.fit(records)
@@ -130,17 +139,15 @@ def build_snapshot(rec: PatientRecord, lookback_days: int) -> PatientSnapshot:
 
 
 # --------------------------------------------------------------------------
-# FEMR / EHR-shot loader. Configurable, tolerant of missing files so the demo
-# never hard-fails; raises clear errors when 'femr' source is requested without
-# the necessary extracts.
+# Event/label loader for the FEMR-style contract (shared by data.source=femr
+# and data.source=mimic). Raises clear errors when paths are missing.
 # --------------------------------------------------------------------------
-def _load_femr_records(cfg) -> list[PatientRecord]:
-    events_path = cfg.get("data.femr.events_path")
-    labels_path = cfg.get("data.femr.labels_path")
+def _load_event_label_records(events_path, labels_path, source: str) -> list[PatientRecord]:
     if not events_path or not labels_path:
         raise FileNotFoundError(
-            "data.source=femr requires data.femr.events_path and data.femr.labels_path. "
-            "Provide FEMR/EHR-shot extracts (see README) or use data.source=synthetic."
+            f"data.source={source} requires data.{source}.events_path and "
+            f"data.{source}.labels_path (build MIMIC via "
+            f"`python -m agentic_ehr.data.mimic.build`, or provide FEMR extracts)."
         )
     events_df = _read_table(events_path)
     labels_df = _read_table(labels_path)

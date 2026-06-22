@@ -8,5 +8,9 @@ venv/
 .DS_Store
 tests/
 
+# Credentialed MIMIC-IV data (PhysioNet DUA) and run outputs
+datasets/
+artifacts/
+
 # Claude Code machine-local settings (contains absolute paths; never commit)
 .claude/settings.local.json

@@ -1,0 +1,53 @@
+# MIMIC-IV multi-task config for the health-summary agent.
+# Build tables first:
+#   python -m agentic_ehr.data.mimic.build --root <MIMIC_ROOT> --out-dir artifacts/mimic
+# Train all tasks:
+#   agentic-ehr --config config/mimic.yaml mimic-train
+# Demo a patient's health profile + report:
+#   agentic-ehr --config config/mimic.yaml mimic-demo --patient-id <hadm_id>
+
+seed: 42
+
+data:
+  source: mimic
+  mimic:
+    events_path: artifacts/mimic/events.parquet   # labels_<task>.parquet live alongside
+  featurize:
+    lookback_days: 3650
+    max_features: 400
+    numeric_codes: auto
+
+model:
+  name: xgboost
+  params:
+    n_estimators: 300
+    max_depth: 5
+    learning_rate: 0.05
+    subsample: 0.9
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+    n_jobs: 4
+  calibrate: true
+  calibration_method: isotonic
+
+explain:
+  top_k_contributors: 5
+  method: auto
+  concept_map_path: null
+
+agent:
+  # NOTE: MIMIC is credentialed (PhysioNet DUA). Configure the Gemini endpoint to
+  # one with no data retention/training before running mimic-demo on real data.
+  risk_tiers:
+    - {max: 0.10, tier: low}
+    - {max: 0.30, tier: moderate}
+    - {max: 1.01, tier: elevated}
+  llm:
+    provider: gemini
+    model: null
+    max_tokens: 4000
+
+paths:
+  model_dir: artifacts/models_mimic
+  reports_dir: artifacts/reports

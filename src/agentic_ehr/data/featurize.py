@@ -17,7 +17,10 @@ from .schema import PatientRecord
 
 logger = get_logger(__name__)
 
-_NUMERIC_CODES = ("LAB/HbA1c", "LAB/eGFR")  # codes whose latest value is a feature
+# Default codes whose latest numeric value becomes a feature. Datasets with
+# their own numeric concepts (e.g. MIMIC labs/vitals) override this via the
+# ``numeric_codes`` constructor argument (wired from ``data.featurize.numeric_codes``).
+_NUMERIC_CODES = ("LAB/HbA1c", "LAB/eGFR")
 
 
 class CountFeaturizer:
@@ -30,9 +33,26 @@ class CountFeaturizer:
       * ``n_events`` total event count in window
     """
 
-    def __init__(self, lookback_days: int = 365, max_features: int = 200):
+    def __init__(
+        self,
+        lookback_days: int = 365,
+        max_features: int = 200,
+        numeric_codes: tuple[str, ...] | list[str] | str | None = None,
+    ):
         self.lookback_days = lookback_days
         self.max_features = max_features
+        # Codes whose latest numeric value is exposed as a ``value__<code>`` column.
+        # ``numeric_codes="auto"`` detects them from the data (any code that ever
+        # carries a numeric value); otherwise an explicit whitelist is used.
+        if numeric_codes == "auto":
+            self.numeric_mode = "auto"
+            self.numeric_code_whitelist: tuple[str, ...] = ()
+        elif numeric_codes is not None:
+            self.numeric_mode = "whitelist"
+            self.numeric_code_whitelist = tuple(numeric_codes)
+        else:
+            self.numeric_mode = "whitelist"
+            self.numeric_code_whitelist = _NUMERIC_CODES
         self.vocab_: list[str] = []
         self.numeric_codes_: list[str] = []
         self.feature_names_: list[str] = []
@@ -49,7 +69,16 @@ class CountFeaturizer:
         # order is deterministic regardless of set/dict iteration order (which
         # depends on PYTHONHASHSEED). This keeps training fully reproducible.
         self.vocab_ = [c for c, _ in sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))][: self.max_features]
-        self.numeric_codes_ = [c for c in _NUMERIC_CODES if c in self.vocab_]
+        if self.numeric_mode == "auto":
+            numeric_detected = {
+                e.code
+                for rec in records
+                for e in rec.events
+                if isinstance(e.value, (int, float)) and e.value == e.value  # exclude NaN
+            }
+            self.numeric_codes_ = [c for c in self.vocab_ if c in numeric_detected]
+        else:
+            self.numeric_codes_ = [c for c in self.numeric_code_whitelist if c in self.vocab_]
         self.feature_names_ = (
             [f"count__{c}" for c in self.vocab_]
             + [f"value__{c}" for c in self.numeric_codes_]

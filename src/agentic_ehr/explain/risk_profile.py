@@ -50,6 +50,53 @@ class RiskProfile:
         return int(round(self.probability * 100))
 
 
+@dataclass
+class TaskPrediction:
+    """One label's prediction within a multi-task health profile."""
+
+    name: str
+    label: str
+    group: str                         # "forward" | "chronic"
+    kind: str                          # "binary" | "regression"
+    positive_label: str
+    horizon: str
+    probability: float
+    raw_probability: float
+    risk_tier: str
+    uncertainty: float
+    confidence_label: str
+    auroc: float                       # held-out test AUROC of this task's model
+    contributors: list[ContributorView]
+    protective_factors: list[ContributorView]
+
+    @property
+    def probability_pct(self) -> int:
+        return int(round(self.probability * 100))
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class HealthRiskProfile:
+    """Multi-label prediction panel — the contract the health-summary agent reads.
+
+    Mirrors :class:`RiskProfile` but carries a panel of :class:`TaskPrediction`
+    (forward-looking risks + chronic-phenotype profile) sharing one patient
+    snapshot, instead of a single prediction.
+    """
+
+    forward: list[TaskPrediction]
+    chronic: list[TaskPrediction]
+    snapshot: dict[str, Any]
+    demographics: dict[str, Any]
+    attribution_method: str
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 class RiskProfileBuilder:
     """Assembles a :class:`RiskProfile` from a model + attributions + concepts.
 

@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import os
 
-from ..explain.risk_profile import RiskProfile
 from ..logging_utils import get_logger
 from . import templates as T
 
@@ -48,74 +47,8 @@ _GEMINI_SCHEMA = {
     "propertyOrdering": list(T.SECTIONS),
 }
 
-# Shared, non-negotiable safety rules used by both output modes.
-_SAFETY_RULES = """Hard rules — these are non-negotiable safety constraints:
-- You are NOT a doctor. Never diagnose, never claim certainty, never tell the
-  patient they "have", "will get", or are "going to" develop any disease.
-- Use ONLY the numbers and factors in the structured input. Never invent
-  symptoms, lab values, diagnoses, medications, or treatments.
-- State the estimated chance using the exact whole-number percentage from the
-  input (e.g. "about 42%"), and make clear it is a statistical estimate, not a
-  prediction of what will happen to this person.
-- Reflect the model's stated uncertainty honestly. When the confidence label is
-  "lower", explicitly tell the reader to treat the estimate with extra caution.
-- Use plain, calm, non-alarming language a non-expert can read.
-- Recommend discussing the results with a qualified clinician.
-
-Avoid these phrasings entirely: "you have", "you will", "you are going to",
-"diagnosed with", "is certain", "guaranteed", "you must take", "stop taking",
-"no need to see"."""
-
-# Template mode: force the five fixed sections via structured outputs.
-_SYSTEM_PROMPT = f"""You are a careful health-information assistant. You translate a
-machine-learning model's risk estimate into a patient-friendly summary.
-
-{_SAFETY_RULES}
-
-Content requirements per section:
-- "What we found": state the estimated chance and the exact whole-number
-  percentage; make clear it is a statistical estimate, not a prediction.
-- "What may be contributing": describe the listed contributing factors in plain
-  language as associations the model noticed, not proven causes.
-- "What this means": give calm, balanced context; reflect the confidence level.
-- "What to do next": non-prescriptive, educational next steps to discuss with a
-  clinician. Never give treatment instructions or tell them to start/stop a drug.
-- "When to seek care urgently": general, widely-recognised warning signs only —
-  not tailored to this individual's estimate.
-
-Return exactly the five sections defined by the output schema. Each value is a
-short, readable paragraph (the urgent-care section may use a short list)."""
-
-# Free mode: one cohesive narrative, no fixed sections, no JSON schema.
-_SYSTEM_PROMPT_FREE = f"""You are a careful health-information assistant. You translate a
-machine-learning model's risk estimate into a patient-friendly summary.
-
-{_SAFETY_RULES}
-
-Write a single, cohesive, free-form summary in plain language (a few short
-paragraphs). Do not use a fixed template or rigid section headings. Naturally
-cover: what the model estimated (with the exact percentage), what factors are
-associated with it (as associations, not causes), what it does and does not
-mean, sensible next steps to discuss with a clinician, and general warning signs
-that warrant urgent care. Keep it calm, non-diagnostic, and grounded only in the
-provided input. Return plain text only — no JSON, no code fences."""
-
-
 class SummaryBackendError(RuntimeError):
     """Raised when the LLM backend cannot be constructed or invoked."""
-
-
-def _user_prompt(profile: RiskProfile, use_template: bool) -> str:
-    payload = json.dumps(profile.to_dict(), indent=2, default=str)
-    ask = (
-        "Produce the five-section summary"
-        if use_template
-        else "Produce a single free-form summary"
-    )
-    return (
-        f"Here is the structured risk profile. {ask}, faithful to these numbers "
-        f"and factors only:\n\n" + payload
-    )
 
 
 def _parse_sections(text: str) -> dict[str, str]:
@@ -152,18 +85,19 @@ class _BaseLLMBackend:
         otherwise JSON constrained to ``schema``. Returns the raw text."""
         raise NotImplementedError
 
-    def generate(self, profile: RiskProfile, use_template: bool = True) -> dict[str, str]:
-        """Return the summary as a dict.
-
-        * template mode -> ``{section: text}`` for the five fixed sections.
-        * free mode     -> ``{"Summary": text}`` with one free-form narrative.
-        """
+    def run_sections(
+        self, system_template: str, system_free: str, payload: dict, use_template: bool = True
+    ) -> dict[str, str]:
+        """Generic section generator. Callers supply the system prompts and a
+        JSON-serialisable ``payload`` (the structured input). Returns either the
+        five fixed sections (template) or ``{"Summary": text}`` (free)."""
+        user = (
+            "Here is the structured input. Produce the summary, faithful to these "
+            "numbers and factors only:\n\n" + json.dumps(payload, indent=2, default=str)
+        )
         if use_template:
-            text = self._complete(
-                _SYSTEM_PROMPT, _user_prompt(profile, True), self._schema()
-            )
-            return _parse_sections(text)
-        text = self._complete(_SYSTEM_PROMPT_FREE, _user_prompt(profile, False), None)
+            return _parse_sections(self._complete(system_template, user, self._schema()))
+        text = self._complete(system_free, user, None)
         if not text or not text.strip():
             raise SummaryBackendError("Model returned no text content.")
         return {"Summary": text.strip()}

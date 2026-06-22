@@ -12,20 +12,37 @@ logger = get_logger("agentic_ehr.cli")
 
 
 def _cmd_train(args) -> int:
-    from .pipeline import train
-
     cfg = Config.load(args.config)
+    if cfg.get("data.source") == "mimic":
+        from .data.mimic.multitask import train_all
+
+        manifest = train_all(cfg, cfg.get("paths.model_dir", "artifacts/models_mimic"))
+        summary = {name: {"auroc": round(i["metrics"]["auroc"], 3),
+                          "auprc": round(i["metrics"]["auprc"], 3), "group": i["group"]}
+                   for name, i in manifest["tasks"].items()}
+        print(json.dumps({"model_dir": cfg.get("paths.model_dir"), "tasks": summary}, indent=2))
+        return 0
+
+    from .pipeline import train
     result = train(cfg)
     print(json.dumps({"model_path": result.model_path, "test_metrics": result.metrics}, indent=2))
     return 0
 
 
 def _cmd_evaluate(args) -> int:
+    cfg = Config.load(args.config)
+    if cfg.get("data.source") == "mimic":
+        from .data.mimic.multitask import MultiTaskModel
+
+        model = MultiTaskModel.load(args.model or cfg.get("paths.model_dir", "artifacts/models_mimic"))
+        metrics = {name: tm.metrics for name, tm in model.task_models.items()}
+        print(json.dumps({"task_metrics": metrics}, indent=2))
+        return 0
+
     from .eval.model_eval import evaluate_predictions
     from .eval.summary_eval import evaluate_summary
     from .pipeline import InferenceService
 
-    cfg = Config.load(args.config)
     svc = InferenceService.from_config(cfg, model_path=args.model)
 
     # Predictive metrics on the held-out test split.
@@ -55,9 +72,12 @@ def _cmd_evaluate(args) -> int:
 
 
 def _cmd_demo(args) -> int:
+    cfg = Config.load(args.config)
+    if cfg.get("data.source") == "mimic":
+        return _demo_mimic(args, cfg)
+
     from .pipeline import InferenceService
 
-    cfg = Config.load(args.config)
     svc = InferenceService.from_config(cfg, model_path=args.model)
 
     if args.patient_id:
@@ -85,21 +105,49 @@ def _cmd_demo(args) -> int:
     return 0
 
 
+def _demo_mimic(args, cfg) -> int:
+    """MIMIC multi-task path for `demo`: prediction panel -> health report."""
+    from .agent.summary_agent import SummaryAgent
+    from .data.mimic.service import MultiTaskInferenceService
+
+    svc = MultiTaskInferenceService.from_config(cfg, model_dir=args.model)
+    patient_id = args.patient_id or svc.any_patient_id()
+    profile = svc.profile_for(patient_id)
+
+    print("=" * 72)
+    print(f"PATIENT {patient_id} | age {profile.demographics.get('age')} "
+          f"sex {profile.demographics.get('sex')}")
+    print("=" * 72)
+    print("FORWARD RISK PANEL:")
+    for t in profile.forward:
+        print(f"  {t.label:24s} {t.probability_pct:3d}%  ({t.confidence_label} confidence, AUROC {t.auroc:.2f})")
+    print("CHRONIC PHENOTYPE PANEL:")
+    for t in profile.chronic:
+        print(f"  {t.label:48s} {t.probability_pct:3d}%")
+    print("=" * 72)
+
+    report = SummaryAgent.from_config(cfg).summarize(profile, use_template=not args.no_template)
+    print(report.to_text())
+    if report.guardrail_warnings:
+        print("\n[guardrail warnings]", report.guardrail_warnings, file=sys.stderr)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="agentic-ehr", description=__doc__)
     p.add_argument("--config", default=None, help="Path to YAML config (default: config/default.yaml)")
     sub = p.add_subparsers(dest="command", required=True)
 
-    t = sub.add_parser("train", help="Train and save the baseline model.")
+    t = sub.add_parser("train", help="Train model(s). Multi-task when data.source=mimic.")
     t.set_defaults(func=_cmd_train)
 
-    e = sub.add_parser("evaluate", help="Evaluate model + summary quality.")
-    e.add_argument("--model", default=None)
+    e = sub.add_parser("evaluate", help="Evaluate predictive (+ summary) metrics.")
+    e.add_argument("--model", default=None, help="Model path (single) or model dir (mimic).")
     e.add_argument("--n-summaries", type=int, default=20)
     e.set_defaults(func=_cmd_evaluate)
 
-    d = sub.add_parser("demo", help="Generate a patient-facing summary.")
-    d.add_argument("--model", default=None)
+    d = sub.add_parser("demo", help="Generate a patient-facing summary / health report.")
+    d.add_argument("--model", default=None, help="Model path (single) or model dir (mimic).")
     d.add_argument("--patient-id", default=None)
     d.add_argument(
         "--no-template",
