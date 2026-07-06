@@ -24,6 +24,12 @@ from . import templates as T
 logger = get_logger(__name__)
 
 
+def _top_forward_risk(profile: HealthRiskProfile):
+    """Highest-probability binary forward risk (regression tasks have no probability)."""
+    binary = [t for t in profile.forward if t.probability is not None]
+    return max(binary, key=lambda t: t.probability) if binary else None
+
+
 def _single_payload(profile: RiskProfile) -> dict:
     return {**profile.to_dict(), "probability_pct": profile.probability_pct}
 
@@ -131,7 +137,7 @@ class SummaryAgent:
                 _health_payload(profile), use_template,
             )
             warnings = self._validate_health(sections, profile, use_template)
-            top = profile.forward[0] if profile.forward else None
+            top = _top_forward_risk(profile)
             risk_tier = top.risk_tier if top else "n/a"
             probability_pct = top.probability_pct if top else 0
         else:
@@ -185,8 +191,8 @@ class SummaryAgent:
 
     def _validate_health(self, sections, profile: HealthRiskProfile, use_template: bool) -> list[str]:
         warnings, blob = self._check_common(sections, use_template)
-        if profile.forward:
-            top = profile.forward[0]
+        top = _top_forward_risk(profile)
+        if top is not None:
             text = sections.get("What we found", "") if use_template else " ".join(sections.values())
             if str(top.probability_pct) not in text:
                 warnings.append("top forward-risk percentage not faithfully stated")

@@ -52,7 +52,11 @@ class RiskProfile:
 
 @dataclass
 class TaskPrediction:
-    """One label's prediction within a multi-task health profile."""
+    """One label's prediction within a multi-task health profile.
+
+    Binary tasks populate the probability/risk_tier/auroc fields; regression tasks
+    leave them ``None`` and populate ``point_estimate`` instead.
+    """
 
     name: str
     label: str
@@ -60,22 +64,49 @@ class TaskPrediction:
     kind: str                          # "binary" | "regression"
     positive_label: str
     horizon: str
-    probability: float
-    raw_probability: float
-    risk_tier: str
     uncertainty: float
     confidence_label: str
-    auroc: float                       # held-out test AUROC (binary) of this task's model
     contributors: list[ContributorView]
     protective_factors: list[ContributorView]
-    point_estimate: float | None = None  # continuous prediction for regression tasks
+    probability: float | None = None        # binary only
+    raw_probability: float | None = None     # binary only
+    risk_tier: str | None = None             # binary only
+    auroc: float | None = None               # held-out test AUROC (binary only)
+    point_estimate: float | None = None      # regression only
 
     @property
-    def probability_pct(self) -> int:
-        return int(round(self.probability * 100))
+    def probability_pct(self) -> int | None:
+        return None if self.probability is None else int(round(self.probability * 100))
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_risk_profile(cls, rp: "RiskProfile", spec, auroc: float) -> "TaskPrediction":
+        """Build a binary task prediction from a single-task RiskProfile.
+
+        ``spec`` is duck-typed (needs ``name``/``label``/``group``/
+        ``positive_label``/``horizon``), so this stays free of MIMIC imports.
+        """
+        return cls(
+            name=spec.name, label=spec.label, group=spec.group, kind="binary",
+            positive_label=spec.positive_label, horizon=spec.horizon,
+            uncertainty=rp.uncertainty, confidence_label=rp.confidence_label,
+            contributors=rp.contributors, protective_factors=rp.protective_factors,
+            probability=rp.probability, raw_probability=rp.raw_probability,
+            risk_tier=rp.risk_tier, auroc=auroc,
+        )
+
+    @classmethod
+    def regression(cls, spec, *, point_estimate, uncertainty, confidence_label,
+                   contributors, protective_factors) -> "TaskPrediction":
+        return cls(
+            name=spec.name, label=spec.label, group=spec.group, kind="regression",
+            positive_label=spec.positive_label, horizon=spec.horizon,
+            uncertainty=uncertainty, confidence_label=confidence_label,
+            contributors=contributors, protective_factors=protective_factors,
+            point_estimate=point_estimate,
+        )
 
 
 @dataclass
@@ -123,11 +154,11 @@ class RiskProfileBuilder:
         decreasing = [c for c in contribs if c.signed_impact < 0]
 
         max_mag = max((abs(c.signed_impact) for c in contribs), default=1.0) or 1.0
-        views_up = [self._to_view(c, max_mag) for c in increasing]
-        views_down = [self._to_view(c, max_mag) for c in decreasing]
+        views_up = [self.to_view(c, max_mag) for c in increasing]
+        views_down = [self.to_view(c, max_mag) for c in decreasing]
 
         tier = self._tier(model_output.probability)
-        conf_label = self._confidence_label(model_output.uncertainty)
+        conf_label = self.confidence_label(model_output.uncertainty)
 
         notes = []
         if self.attributor.method == "approx":
@@ -155,7 +186,7 @@ class RiskProfileBuilder:
             notes=notes,
         )
 
-    def _to_view(self, c: Contribution, max_mag: float) -> ContributorView:
+    def to_view(self, c: Contribution, max_mag: float) -> ContributorView:
         concept = self.concept_map.resolve(c.feature)
         return ContributorView(
             concept=concept.name,
@@ -174,7 +205,7 @@ class RiskProfileBuilder:
         return self.risk_tiers[-1]["tier"]
 
     @staticmethod
-    def _confidence_label(uncertainty: float) -> str:
+    def confidence_label(uncertainty: float) -> str:
         if uncertainty < 0.34:
             return "higher"
         if uncertainty < 0.67:
