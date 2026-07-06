@@ -19,14 +19,14 @@ import pandas as pd
 class ModelOutput:
     """Per-patient model output.
 
-    ``probability``        calibrated probability of the positive outcome (classification).
-    ``raw_probability``    pre-calibration probability (for diagnostics).
+    ``probability``        calibrated probability (classification; None for regression).
+    ``raw_probability``    pre-calibration probability (classification; None for regression).
     ``uncertainty``        scalar in [0, 1]; higher = less confident.
     ``point_estimate``     continuous prediction for regression tasks (else None).
     """
 
-    probability: float
-    raw_probability: float
+    probability: float | None
+    raw_probability: float | None
     uncertainty: float = 0.0
     point_estimate: float | None = None
     extra: dict = field(default_factory=dict)

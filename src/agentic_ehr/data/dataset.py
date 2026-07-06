@@ -182,12 +182,20 @@ def _load_event_label_records(events_path, labels_path, source: str) -> list[Pat
                 patient_id=pid,
                 events=events,
                 prediction_time=pd.to_datetime(row.label_time).to_pydatetime(),
-                label=int(row.value),
+                label=_coerce_label(row.value),
                 demographics=demo,
             )
         )
     logger.info("Loaded %d FEMR/EHR-shot records", len(records))
     return records
+
+
+def _coerce_label(value):
+    """Binary labels -> int, regression labels -> float, missing -> None."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    fval = float(value)
+    return int(fval) if fval.is_integer() else fval
 
 
 def _read_table(path: str | Path) -> pd.DataFrame:

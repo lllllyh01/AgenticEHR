@@ -44,7 +44,7 @@ agent:
     - {max: 0.30, tier: moderate}
     - {max: 1.01, tier: elevated}
   llm:
-    provider: gemini
+    provider: claude     # Supported providers: gemini | claude | openai
     model: null
     max_tokens: 4000
 

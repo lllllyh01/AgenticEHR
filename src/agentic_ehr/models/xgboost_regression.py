@@ -42,7 +42,7 @@ class XGBoostRegressionModel(BaseModel):
         pred = self.predict(X)
         unc = self._uncertainty(X)
         return [
-            ModelOutput(probability=0.0, raw_probability=0.0,
+            ModelOutput(probability=None, raw_probability=None,
                         uncertainty=float(u), point_estimate=float(p))
             for p, u in zip(pred, unc)
         ]

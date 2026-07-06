@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 explain = ["shap>=0.44"]
 openai = ["openai>=1.40"]
+mimic = ["duckdb>=1.0", "pyarrow>=14.0"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

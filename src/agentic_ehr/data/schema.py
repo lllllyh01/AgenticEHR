@@ -28,7 +28,7 @@ class PatientRecord:
     patient_id: str
     events: list[Event]
     prediction_time: datetime
-    label: int | None = None      # ground-truth outcome (None at inference)
+    label: int | float | None = None  # ground-truth outcome (float for regression; None at inference)
     demographics: dict[str, Any] = field(default_factory=dict)
 
     def events_before(self, time: datetime) -> list[Event]:
