@@ -108,21 +108,18 @@ def to_text(record: dict) -> str:
     return out.replace("```json", "").replace("```", "").replace("# ", "").replace("#", "")
 
 
-def write_record(record: dict, out_dir: str, formats=("json", "md")) -> list[str]:
+def write_record(record: dict, out_dir: str, formats=("json", "md"),
+                 out_filename: str | None = None) -> list[str]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    pid = record["metadata"]["patient_id"]
+    out_filename = out_filename or record["metadata"]["patient_id"]
+    renderers = {"json": lambda: json.dumps(record, indent=2, default=str),
+                 "md": lambda: to_markdown(record),
+                 "txt": lambda: to_text(record)}
     written = []
-    if "json" in formats:
-        p = out / f"{pid}.json"
-        p.write_text(json.dumps(record, indent=2, default=str))
-        written.append(str(p))
-    if "md" in formats:
-        p = out / f"{pid}.md"
-        p.write_text(to_markdown(record))
-        written.append(str(p))
-    if "txt" in formats:
-        p = out / f"{pid}.txt"
-        p.write_text(to_text(record))
-        written.append(str(p))
+    for ext in ("json", "md", "txt"):
+        if ext in formats:
+            p = out / f"{out_filename}.{ext}"
+            p.write_text(renderers[ext]())
+            written.append(str(p))
     return written

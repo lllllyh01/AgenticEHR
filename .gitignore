@@ -7,10 +7,14 @@ venv/
 .pytest_cache/
 .DS_Store
 tests/
+docs/code-review.md
+docs/my-work-log.md
 
 # Credentialed MIMIC-IV data (PhysioNet DUA) and run outputs
 datasets/
-artifacts/
+artifacts/*
+!artifacts/responses/
+!artifacts/responses/**
 
 # Claude Code machine-local settings (contains absolute paths; never commit)
 .claude/settings.local.json

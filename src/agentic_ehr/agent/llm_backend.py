@@ -280,11 +280,8 @@ class OpenAIBackend(_BaseLLMBackend):
 
 _PROVIDERS = {
     "gemini": GeminiBackend,
-    "google": GeminiBackend,
     "claude": AnthropicBackend,
-    "anthropic": AnthropicBackend,
     "openai": OpenAIBackend,
-    "gpt": OpenAIBackend,
 }
 
 

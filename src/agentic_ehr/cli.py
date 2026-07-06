@@ -17,9 +17,12 @@ def _cmd_train(args) -> int:
         from .data.mimic.multitask import train_all
 
         manifest = train_all(cfg, cfg.get("paths.model_dir", "artifacts/models_mimic"))
-        summary = {name: {"auroc": round(i["metrics"]["auroc"], 3),
-                          "auprc": round(i["metrics"]["auprc"], 3), "group": i["group"]}
-                   for name, i in manifest["tasks"].items()}
+        summary = {}
+        for name, i in manifest["tasks"].items():
+            m = i["metrics"]
+            headline = ({"auroc": round(m["auroc"], 3), "auprc": round(m["auprc"], 3)}
+                        if "auroc" in m else {"mae": round(m["mae"], 3), "r2": round(m["r2"], 3)})
+            summary[name] = {**headline, "group": i["group"], "kind": i["kind"]}
         print(json.dumps({"model_dir": cfg.get("paths.model_dir"), "tasks": summary}, indent=2))
         return 0
 
@@ -103,7 +106,8 @@ def _cmd_demo(args) -> int:
     if summary.guardrail_warnings:
         print("\n[guardrail warnings]", summary.guardrail_warnings, file=sys.stderr)
     feats = svc.dataset.features_for(patient_id).iloc[0].to_dict() if args.save_response else None
-    _maybe_save_response(args, patient_id, profile, summary,
+    if getattr(args, "save_response", None) is not None:
+        _save_response(args, cfg, patient_id, profile, summary,
                          model_info={"model_path": args.model}, features=feats)
     return 0
 
@@ -115,7 +119,11 @@ def _demo_mimic(args, cfg) -> int:
 
     svc = MultiTaskInferenceService.from_config(cfg, model_dir=args.model)
     patient_id = args.patient_id or svc.any_patient_id()
-    profile = svc.profile_for(patient_id)
+    # Featurize the patient once when also saving the response.
+    if args.save_response:
+        profile, features = svc.profile_and_features(patient_id)
+    else:
+        profile, features = svc.profile_for(patient_id), None
 
     print("=" * 72)
     print(f"PATIENT {patient_id} | age {profile.demographics.get('age')} "
@@ -136,20 +144,26 @@ def _demo_mimic(args, cfg) -> int:
     print(report.to_text())
     if report.guardrail_warnings:
         print("\n[guardrail warnings]", report.guardrail_warnings, file=sys.stderr)
-    _maybe_save_response(args, patient_id, profile, report,
+    if getattr(args, "save_response", None) is not None:
+        _save_response(args, cfg, patient_id, profile, report,
                          model_info={"model_dir": args.model or cfg.get("paths.model_dir")},
-                         features=svc.features_for(patient_id) if args.save_response else None)
+                         features=features)
     return 0
 
 
-def _maybe_save_response(args, patient_id, profile, summary, *, model_info, features) -> None:
-    if not getattr(args, "save_response", None):
-        return
+def _save_response(args, cfg, patient_id, profile, summary, *, model_info, features) -> None:
+    from pathlib import Path
+
     from .eval.response_log import build_record, write_record
 
+    # <base>/<dataset>/<provider>_<patient_id>.<ext>  e.g. artifacts/responses/mimic/claude_22595853.json
+    dataset = cfg.get("data.source", "synthetic")
+    provider = cfg.get("agent.llm.provider", "gemini")
+    out_dir = str(Path(args.save_response) / dataset)
+    out_filename = f"{provider}_{patient_id}"
     formats = tuple(f.strip() for f in (args.response_format or "json,md").split(","))
     record = build_record(patient_id, profile, summary, model_info=model_info, features=features)
-    paths = write_record(record, args.save_response, formats=formats)
+    paths = write_record(record, out_dir, formats=formats, out_filename=out_filename)
     print(f"\n[saved response] {', '.join(paths)}", file=sys.stderr)
 
 
