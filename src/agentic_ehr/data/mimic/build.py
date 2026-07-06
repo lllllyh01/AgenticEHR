@@ -40,6 +40,7 @@ import pandas as pd
 from ...logging_utils import get_logger
 from . import concepts as C
 from . import io
+from . import tasks as T
 
 logger = get_logger(__name__)
 
@@ -95,8 +96,8 @@ def _cohort(con, root: Path, cfg: BuildConfig) -> pd.DataFrame:
 # --------------------------------------------------------------------------- #
 # Features                                                                      #
 # --------------------------------------------------------------------------- #
-def _vital_features(con, root: Path, cohort: pd.DataFrame) -> pd.DataFrame:
-    con.register("cohort", cohort[["hadm_id", "admittime", "dischtime"]])
+def _vital_features(con, root: Path, cohort: pd.DataFrame, upto: str = "dischtime") -> pd.DataFrame:
+    con.register("cohort", cohort[["hadm_id", "admittime", upto]].rename(columns={upto: "upto"}))
     # itemid -> vital code, with Fahrenheit conversion folded into the value.
     vital_case = "CASE " + " ".join(
         f"WHEN c.itemid IN ({','.join(map(str, v.itemids + v.fahrenheit_itemids))}) THEN '{v.code}'"
@@ -114,7 +115,7 @@ def _vital_features(con, root: Path, cohort: pd.DataFrame) -> pd.DataFrame:
           FROM {io.table(root, 'chartevents')} c
           JOIN cohort co ON c.hadm_id = co.hadm_id
           WHERE c.itemid IN ({all_ids}) AND c.valuenum IS NOT NULL
-            AND c.charttime >= co.admittime AND c.charttime <= co.dischtime
+            AND c.charttime >= co.admittime AND c.charttime <= co.upto
         ) GROUP BY hadm_id, vital
     """).fetch_df()
     con.unregister("cohort")
@@ -131,8 +132,8 @@ def _vital_features(con, root: Path, cohort: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _lab_features(con, root: Path, cohort: pd.DataFrame) -> pd.DataFrame:
-    con.register("cohort", cohort[["hadm_id", "dischtime"]])
+def _lab_features(con, root: Path, cohort: pd.DataFrame, upto: str = "dischtime") -> pd.DataFrame:
+    con.register("cohort", cohort[["hadm_id", upto]].rename(columns={upto: "upto"}))
     lab_case = "CASE " + " ".join(
         f"WHEN l.itemid IN ({','.join(map(str, lab.itemids))}) THEN '{lab.code}'"
         for lab in C.LAB_PANEL
@@ -145,7 +146,7 @@ def _lab_features(con, root: Path, cohort: pd.DataFrame) -> pd.DataFrame:
           FROM {io.table(root, 'labevents')} l
           JOIN cohort co ON l.hadm_id = co.hadm_id
           WHERE l.itemid IN ({all_ids}) AND l.valuenum IS NOT NULL
-            AND l.charttime <= co.dischtime
+            AND l.charttime <= co.upto
         ) GROUP BY hadm_id, lab
     """).fetch_df()
     con.unregister("cohort")
@@ -221,11 +222,20 @@ def _readmission(con, root: Path, cohort: pd.DataFrame, days: int) -> pd.Series:
     return df.set_index("hadm_id")["readmit"]
 
 
+def _window_anchor(cohort: pd.DataFrame, window: int | None) -> pd.Series:
+    """Observation-cutoff timestamp for a window: discharge (``None``) or
+    ``admittime + window hours``, never past discharge."""
+    disch = pd.to_datetime(cohort["dischtime"]).reset_index(drop=True)
+    if window is None:
+        return disch
+    cutoff = pd.to_datetime(cohort["admittime"]).reset_index(drop=True) + pd.Timedelta(hours=window)
+    return cutoff.where(cutoff <= disch, disch)
+
+
 def _labels(con, root: Path, cohort: pd.DataFrame, cfg: BuildConfig,
             chronic_groups: dict[int, set[str]]) -> dict[str, pd.DataFrame]:
-    base = pd.DataFrame({
+    demo = pd.DataFrame({
         "patient_id": cohort["hadm_id"].astype("int64").astype(str),
-        "label_time": cohort["prediction_time"],
         "age": cohort["age_at_admit"].astype(float),
         "sex": cohort["gender"].map({"F": "female", "M": "male"}).fillna("unknown"),
     }).reset_index(drop=True)
@@ -239,29 +249,35 @@ def _labels(con, root: Path, cohort: pd.DataFrame, cfg: BuildConfig,
 
     los = cohort["hosp_los_days"].astype(float).reset_index(drop=True)
 
-    out: dict[str, pd.DataFrame] = {
-        "mortality_1y": base.assign(value=mort.values),
-        "readmission_30d": base.assign(value=readmit.values),
-        "prolonged_stay": base.assign(value=(los >= cfg.los_long_days).astype(int).values),
-        "los_days": base.assign(value=los.values),
-    }
-    # Chronic phenotype targets.
+    # Per-task label values; label_time comes from each task's observation window.
     hadm_ids = cohort["hadm_id"].astype("int64").reset_index(drop=True)
+    values: dict[str, pd.Series] = {
+        "mortality_1y": mort,
+        "readmission_30d": readmit,
+        "prolonged_stay": (los >= cfg.los_long_days).astype(int),
+        "los_days": los,
+    }
     for grp in C.CHRONIC_TARGETS:
-        vals = hadm_ids.map(lambda h: 1 if grp.code in chronic_groups.get(int(h), set()) else 0)
-        out[f"dx_{grp.code.lower()}"] = base.assign(value=vals.values)
+        values[f"dx_{grp.code.lower()}"] = hadm_ids.map(
+            lambda h: 1 if grp.code in chronic_groups.get(int(h), set()) else 0)
+
+    out: dict[str, pd.DataFrame] = {}
+    for task in T.ALL_TASKS:
+        anchor = _window_anchor(cohort, task.window)
+        out[task.name] = demo.assign(label_time=anchor.values, value=values[task.name].values)
     return out
 
 
 # --------------------------------------------------------------------------- #
 # Orchestration                                                                 #
 # --------------------------------------------------------------------------- #
-def _events(parts: list[pd.DataFrame], cohort: pd.DataFrame) -> pd.DataFrame:
+def _events(parts: list[pd.DataFrame], cohort: pd.DataFrame,
+            time_col: str = "prediction_time") -> pd.DataFrame:
     parts = [p for p in parts if p is not None and not p.empty]
     ev = pd.concat(parts, ignore_index=True)
-    # All feature events are timestamped at the discharge anchor (within lookback).
-    pt = cohort.set_index("hadm_id")["prediction_time"]
-    ev["time"] = ev["hadm_id"].map(pt)
+    # All feature events are timestamped at this window's anchor (within lookback).
+    anchor = cohort.set_index("hadm_id")[time_col]
+    ev["time"] = ev["hadm_id"].map(anchor)
     ev = ev.rename(columns={"hadm_id": "patient_id"})
     ev["patient_id"] = ev["patient_id"].astype("int64").astype(str)
     return ev[["patient_id", "time", "code", "value", "description"]].sort_values(["patient_id", "code"])
@@ -277,17 +293,26 @@ def build(cfg: BuildConfig) -> dict[str, str]:
     if cohort.empty:
         raise RuntimeError("Empty cohort — check filters / MIMIC root.")
 
-    logger.info("Vital features ...");   vitals = _vital_features(con, root, cohort)
-    logger.info("Lab features ...");     labs = _lab_features(con, root, cohort)
+    # Window-independent features (prior-admission history + utilization).
     logger.info("Dx history (prior) ..."); prior_groups = _icd_by_index(con, root, cohort, prior_only=True)
     dx_hist = _dx_history_features(prior_groups)
     logger.info("Utilization ...");      util = _utilization_features(con, root, cohort)
     logger.info("Chronic labels (prior+index) ..."); chronic_groups = _icd_by_index(con, root, cohort, prior_only=False)
 
-    events = _events([vitals, labs, dx_hist, util], cohort)
-    events_path = out / "events.parquet"
-    events.to_parquet(events_path, index=False)
-    written = {"events": str(events_path)}
+    # One feature set per distinct task observation window (differing only in the vital/lab cutoff): window=None -> discharge; window=N -> admit + N hours.
+    written: dict[str, str] = {}
+    for window in sorted({t.window for t in T.ALL_TASKS}, key=lambda w: (w is not None, w or 0)):
+        tag = T.window_tag(window)
+        logger.info("Vital/lab features (%s window) ...", tag)
+        cohort_w = cohort.assign(upto=_window_anchor(cohort, window).values)
+        vitals = _vital_features(con, root, cohort_w, upto="upto")
+        labs = _lab_features(con, root, cohort_w, upto="upto")
+        events = _events([vitals, labs, dx_hist, util], cohort_w, time_col="upto")
+        events_path = out / T.events_filename(window)
+        events.to_parquet(events_path, index=False)
+        written[f"events_{tag}"] = str(events_path)
+        logger.info("  %s: %d events / %d patients -> %s",
+                    tag, len(events), events["patient_id"].nunique(), events_path.name)
 
     for task, df in _labels(con, root, cohort, cfg, chronic_groups).items():
         p = out / f"labels_{task}.parquet"
@@ -297,8 +322,7 @@ def build(cfg: BuildConfig) -> dict[str, str]:
         logger.info("  %-18s n=%d  %s=%.3f", task, len(df),
                     "mean" if task == "los_days" else "pos_rate", stat)
 
-    logger.info("Done. %d events / %d patients -> %s",
-                len(events), events["patient_id"].nunique(), out)
+    logger.info("Done. %d patients -> %s", len(cohort), out)
     con.close()
     return written
 

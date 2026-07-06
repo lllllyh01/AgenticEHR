@@ -28,22 +28,32 @@ from . import tasks as T
 logger = get_logger(__name__)
 
 MANIFEST_NAME = "manifest.json"
-FEATURIZER_NAME = "featurizer.joblib"
 
 
-# --------------------------------------------------------------------------- #
-# Shared feature matrix                                                        #
-# --------------------------------------------------------------------------- #
+def _events_dir(cfg: Config) -> Path:
+    return Path(cfg.get("data.mimic.events_path")).parent
+
+
 def _labels_path(cfg: Config, task_name: str) -> str:
-    events_path = Path(cfg.get("data.mimic.events_path"))
-    return str(events_path.parent / f"labels_{task_name}.parquet")
+    return str(_events_dir(cfg) / f"labels_{task_name}.parquet")
 
 
-def build_matrix(cfg: Config):
-    """Load events once, fit the featurizer, return (records, featurizer, X)."""
-    events_path = cfg.get("data.mimic.events_path")
-    # Any task's labels file provides patient ids / prediction time / demographics.
-    anchor_labels = _labels_path(cfg, T.ALL_TASKS[0].name)
+def _featurizer_name(window: int | None) -> str:
+    return f"featurizer_{T.window_tag(window)}.joblib"
+
+
+def _windows_used() -> list[int | None]:
+    return sorted({t.window for t in T.ALL_TASKS}, key=lambda w: (w is not None, w or 0))
+
+
+def _anchor_task(window: int | None) -> T.TaskSpec:
+    return next(t for t in T.ALL_TASKS if t.window == window)
+
+
+def _build_matrix(cfg: Config, window: int | None):
+    """Featurize one observation window: (featurizer, X indexed by patient_id)."""
+    events_path = str(_events_dir(cfg) / T.events_filename(window))
+    anchor_labels = _labels_path(cfg, _anchor_task(window).name)
     records = _load_event_label_records(events_path, anchor_labels, "mimic")
     featurizer = CountFeaturizer(
         lookback_days=cfg.get("data.featurize.lookback_days", 3650),
@@ -51,22 +61,25 @@ def build_matrix(cfg: Config):
         numeric_codes=cfg.get("data.featurize.numeric_codes", "auto"),
     )
     X = featurizer.fit_transform(records)
-    logger.info("Feature matrix: %d patients x %d features", *X.shape)
-    return records, featurizer, X
+    logger.info("Feature matrix (%s window): %d patients x %d features",
+                T.window_tag(window), *X.shape)
+    return featurizer, X
 
 
-def _load_y(cfg: Config, task_name: str, index: pd.Index) -> np.ndarray:
+def _load_y_series(cfg: Config, task_name: str) -> pd.Series:
     df = pd.read_parquet(_labels_path(cfg, task_name))
-    s = df.set_index(df["patient_id"].astype(str))["value"]
-    return s.reindex(index).to_numpy()
+    return df.set_index(df["patient_id"].astype(str))["value"]
 
 
-def split_ids(index: pd.Index, seed: int, val_frac: float, test_frac: float):
+def split_ids(ids: pd.Index, seed: int, val_frac: float, test_frac: float):
+    """Deterministic patient-id split. Applied to one canonical id ordering and
+    reused across all windows, so a patient is in the same fold everywhere."""
     rng = np.random.default_rng(seed)
-    pos = rng.permutation(len(index))
-    n_test = int(len(pos) * test_frac)
-    n_val = int(len(pos) * val_frac)
-    return pos[n_test + n_val:], pos[n_test:n_test + n_val], pos[:n_test]  # train, val, test
+    perm = rng.permutation(len(ids))
+    n_test = int(len(ids) * test_frac)
+    n_val = int(len(ids) * val_frac)
+    ids = pd.Index(ids)
+    return ids[perm[n_test + n_val:]], ids[perm[n_test:n_test + n_val]], ids[perm[:n_test]]
 
 
 # --------------------------------------------------------------------------- #
@@ -80,34 +93,46 @@ def train_all(cfg: Config, out_dir: str) -> dict:
     calibrate = cfg.get("model.calibrate", True)
     calib_method = cfg.get("model.calibration_method", "isotonic")
 
-    _, featurizer, X = build_matrix(cfg)
-    joblib.dump(featurizer, out / FEATURIZER_NAME)
-    tr, va, te = split_ids(X.index, seed, 0.15, 0.15)
+    # Featurize each observation window; fit one featurizer per window.
+    matrices = {w: _build_matrix(cfg, w) for w in _windows_used()}
+    featurizers = {}
+    for w, (featurizer, _) in matrices.items():
+        name = _featurizer_name(w)
+        joblib.dump(featurizer, out / name)
+        featurizers[T.window_tag(w)] = name       # JSON-safe key (int/None can't be one)
 
-    manifest = {"featurizer": FEATURIZER_NAME, "feature_names": list(X.columns), "tasks": {}}
+    # One canonical patient-id split (from the discharge window), reused across
+    # windows so a patient never lands in different folds for different tasks.
+    canon = (matrices[None] if None in matrices else next(iter(matrices.values())))[1].index
+    train_ids, val_ids, test_ids = split_ids(canon, seed, 0.15, 0.15)
+
+    manifest = {"featurizers": featurizers, "tasks": {}}
     for task in T.ALL_TASKS:
-        y = _load_y(cfg, task.name, X.index)
+        X = matrices[task.window][1]
+        y = _load_y_series(cfg, task.name)
         keep = [c for c in X.columns if c not in set(T.excluded_columns(list(X.columns), task))]
-        Xb = X[keep]
+        Xtr, Xva, Xte = X.loc[train_ids, keep], X.loc[val_ids, keep], X.loc[test_ids, keep]
+        ytr, yva, yte = y.loc[train_ids], y.loc[val_ids], y.loc[test_ids]
         if task.kind == "regression":
             model = XGBoostRegressionModel(params=params)
-            model.fit(Xb.iloc[tr], y[tr], X_val=Xb.iloc[va], y_val=y[va])
-            metrics = evaluate_regression(y[te], model.predict(Xb.iloc[te])).to_dict()
-            logger.info("  %-22s MAE=%.2f RMSE=%.2f R2=%.3f (n=%d, feats=%d)",
-                        task.name, metrics["mae"], metrics["rmse"], metrics["r2"], metrics["n"], len(keep))
+            model.fit(Xtr, ytr.to_numpy(), X_val=Xva, y_val=yva.to_numpy())
+            metrics = evaluate_regression(yte.to_numpy(), model.predict(Xte)).to_dict()
+            logger.info("  %-22s [%s] MAE=%.2f RMSE=%.2f R2=%.3f (n=%d, feats=%d)",
+                        task.name, T.window_tag(task.window), metrics["mae"], metrics["rmse"],
+                        metrics["r2"], metrics["n"], len(keep))
         else:
             model = XGBoostClassifierModel(params=params, calibrate=calibrate, calibration_method=calib_method)
-            model.fit(Xb.iloc[tr], y[tr].astype(int), X_val=Xb.iloc[va], y_val=y[va].astype(int))
-            metrics = evaluate_predictions(y[te].astype(int), model.predict_proba(Xb.iloc[te])).to_dict()
-            logger.info("  %-22s AUROC=%.3f AUPRC=%.3f (n=%d, pos=%d, feats=%d)",
-                        task.name, metrics["auroc"], metrics["auprc"], metrics["n"],
-                        int(y[te].sum()), len(keep))
+            model.fit(Xtr, ytr.astype(int).to_numpy(), X_val=Xva, y_val=yva.astype(int).to_numpy())
+            metrics = evaluate_predictions(yte.astype(int).to_numpy(), model.predict_proba(Xte)).to_dict()
+            logger.info("  %-22s [%s] AUROC=%.3f AUPRC=%.3f (n=%d, pos=%d, feats=%d)",
+                        task.name, T.window_tag(task.window), metrics["auroc"], metrics["auprc"],
+                        metrics["n"], int(yte.sum()), len(keep))
         model_file = f"{task.name}.joblib"
         model.save(str(out / model_file))
         manifest["tasks"][task.name] = {
             "model": model_file, "columns": keep, "kind": task.kind, "group": task.group,
             "label": task.label, "positive_label": task.positive_label, "horizon": task.horizon,
-            "metrics": metrics,
+            "window": task.window, "metrics": metrics,
         }
 
     (out / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2))
@@ -127,17 +152,20 @@ class TaskModel:
 
 
 class MultiTaskModel:
-    """Loads the featurizer + all per-task models for panel inference."""
+    """Loads the per-window featurizers + all per-task models for panel inference."""
 
-    def __init__(self, featurizer: CountFeaturizer, task_models: dict[str, TaskModel]):
-        self.featurizer = featurizer
+    def __init__(self, featurizers: dict[str, CountFeaturizer], task_models: dict[str, TaskModel]):
+        self.featurizers = featurizers      # window_tag -> fitted CountFeaturizer
         self.task_models = task_models
+
+    def featurizer_for(self, window: int | None) -> CountFeaturizer:
+        return self.featurizers[T.window_tag(window)]
 
     @classmethod
     def load(cls, model_dir: str) -> "MultiTaskModel":
         out = Path(model_dir)
         manifest = json.loads((out / MANIFEST_NAME).read_text())
-        featurizer = joblib.load(out / manifest["featurizer"])
+        featurizers = {w: joblib.load(out / fname) for w, fname in manifest["featurizers"].items()}
         task_models: dict[str, TaskModel] = {}
         for name, info in manifest["tasks"].items():
             model_cls = XGBoostRegressionModel if info["kind"] == "regression" else XGBoostClassifierModel
@@ -147,12 +175,6 @@ class MultiTaskModel:
                 columns=info["columns"],
                 metrics=info["metrics"],
             )
-        logger.info("Loaded MultiTaskModel: %d tasks from %s", len(task_models), out)
-        return cls(featurizer, task_models)
-
-    def predict_panel(self, x_row: pd.DataFrame) -> dict[str, "object"]:
-        """Return {task_name: ModelOutput} for a single featurized patient row."""
-        out = {}
-        for name, tm in self.task_models.items():
-            out[name] = tm.model.predict_output(x_row[tm.columns])[0]
-        return out
+        logger.info("Loaded MultiTaskModel: %d tasks, %d windows from %s",
+                    len(task_models), len(featurizers), out)
+        return cls(featurizers, task_models)

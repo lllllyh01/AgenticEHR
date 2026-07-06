@@ -6,14 +6,34 @@ Two panels feed the LLM:
     that *define* the target (see ``exclude_prefixes`` / DX_DEFINING_FEATURES)
     so the task is not a no-op.
 
-All tasks share the same input feature matrix (train == inference); only the
-label vector and the per-task excluded columns differ.
+Each task has an **observation window** ``window`` — the number of hours after
+admission up to which input features may be observed — a per-task property that
+prevents label leakage:
+
+  * ``window = None`` — features up to hospital discharge. Used by outcomes only
+    knowable after the stay (mortality, readmission) and the chronic profile.
+  * ``window = N``    — features up to N hours after admission. Used by
+    length-of-stay tasks (N = 24): predicting how long a stay lasts must NOT see
+    end-of-stay data, or the task is circular.
+
+Tasks sharing one window share one feature matrix; only the label vector and the
+per-task excluded columns differ within a window.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 from . import concepts as C
+
+
+def events_filename(window: int | None) -> str:
+    """Events file for an observation window (alongside the labels tables)."""
+    return "events.parquet" if window is None else f"events_{window}h.parquet"
+
+
+def window_tag(window: int | None) -> str:
+    """Short, JSON/​filename-safe key for a window (int keys can't be JSON keys)."""
+    return "discharge" if window is None else f"{window}h"
 
 
 @dataclass(frozen=True)
@@ -24,6 +44,7 @@ class TaskSpec:
     label: str                      # short human label, e.g. "Diabetes"
     positive_label: str             # phrasing for the agent, e.g. "a diagnosis of diabetes"
     horizon: str
+    window: int | None = None       # observation cutoff in hours after admission (None = discharge)
     exclude_prefixes: tuple[str, ...] = field(default=())
 
 
@@ -32,10 +53,14 @@ FORWARD_TASKS: tuple[TaskSpec, ...] = (
              "death within one year of discharge", "the next 12 months"),
     TaskSpec("readmission_30d", "binary", "forward", "30-day readmission",
              "an unplanned hospital readmission within 30 days", "the next 30 days"),
+    # LOS tasks observe only the first 24h so the input never reveals how long the
+    # stay ultimately lasts.
     TaskSpec("prolonged_stay", "binary", "forward", "prolonged stay",
-             "a prolonged hospital stay (7 days or more)", "this hospital admission"),
+             "a prolonged hospital stay (7 days or more)", "this hospital admission",
+             window=24),
     TaskSpec("los_days", "regression", "forward", "length of stay (days)",
-             "the expected number of hospital days", "this hospital admission"),
+             "the expected number of hospital days", "this hospital admission",
+             window=24),
 )
 
 CHRONIC_TASKS: tuple[TaskSpec, ...] = tuple(
@@ -52,9 +77,6 @@ CHRONIC_TASKS: tuple[TaskSpec, ...] = tuple(
 )
 
 ALL_TASKS: tuple[TaskSpec, ...] = FORWARD_TASKS + CHRONIC_TASKS
-
-# Tasks the binary multi-task trainer handles now (regression is a later milestone).
-BINARY_TASKS: tuple[TaskSpec, ...] = tuple(t for t in ALL_TASKS if t.kind == "binary")
 
 
 def get_task(name: str) -> TaskSpec:
