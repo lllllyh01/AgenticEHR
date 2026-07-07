@@ -1,7 +1,7 @@
 {
   "metadata": {
     "patient_id": "29079034",
-    "generated_at": "2026-07-06T17:14:59+00:00",
+    "generated_at": "2026-07-07T09:30:08+00:00",
     "agent_backend": "llm",
     "mode": "template",
     "model": {
@@ -319,39 +319,47 @@
         "kind": "binary",
         "confidence": "moderate",
         "uncertainty": 0.6574,
-        "attribution_method": "approx",
+        "attribution_method": "shap",
         "top_contributors": [
           {
-            "concept": "Prior hospital admissions",
-            "phrase": "your number of previous hospital admissions",
+            "concept": "Creatinine",
+            "phrase": "your creatinine level",
             "direction": "increases",
-            "magnitude": 0.627,
-            "observed_value": 2.0,
-            "feature": "value__UTIL/N_PRIOR_ADM"
-          },
-          {
-            "concept": "Respiratory disease",
-            "phrase": "a history of respiratory disease",
-            "direction": "increases",
-            "magnitude": 0.613,
-            "observed_value": 1.0,
-            "feature": "count__DX/RESPIRATORY"
+            "magnitude": 1.0,
+            "observed_value": 0.4,
+            "feature": "value__LAB/CREATININE"
           },
           {
             "concept": "Blood urea nitrogen",
             "phrase": "your blood urea nitrogen level",
             "direction": "increases",
-            "magnitude": 0.608,
+            "magnitude": 0.832,
             "observed_value": 35.0,
             "feature": "value__LAB/UREA_NITROGEN"
           },
           {
-            "concept": "Albumin",
-            "phrase": "your albumin level",
+            "concept": "Sodium",
+            "phrase": "your sodium level",
             "direction": "increases",
-            "magnitude": 0.439,
-            "observed_value": 3.8,
-            "feature": "value__LAB/ALBUMIN"
+            "magnitude": 0.659,
+            "observed_value": 130.0,
+            "feature": "value__LAB/SODIUM"
+          },
+          {
+            "concept": "Respiratory disease",
+            "phrase": "a history of respiratory disease",
+            "direction": "increases",
+            "magnitude": 0.541,
+            "observed_value": 1.0,
+            "feature": "count__DX/RESPIRATORY"
+          },
+          {
+            "concept": "Systolic blood pressure (std)",
+            "phrase": "the variability in your systolic blood pressure",
+            "direction": "increases",
+            "magnitude": 0.503,
+            "observed_value": 4.63,
+            "feature": "value__VITAL/SBP_std"
           }
         ],
         "probability": 0.7447,
@@ -368,7 +376,7 @@
         "kind": "binary",
         "confidence": "lower",
         "uncertainty": 0.7308,
-        "attribution_method": "approx",
+        "attribution_method": "shap",
         "top_contributors": [
           {
             "concept": "Prior hospital admissions",
@@ -379,28 +387,36 @@
             "feature": "value__UTIL/N_PRIOR_ADM"
           },
           {
-            "concept": "Respiratory disease",
-            "phrase": "a history of respiratory disease",
+            "concept": "Sodium",
+            "phrase": "your sodium level",
             "direction": "increases",
-            "magnitude": 0.479,
-            "observed_value": 1.0,
-            "feature": "count__DX/RESPIRATORY"
+            "magnitude": 0.599,
+            "observed_value": 130.0,
+            "feature": "value__LAB/SODIUM"
           },
           {
-            "concept": "Overall care activity",
-            "phrase": "how much recent healthcare activity you've had",
+            "concept": "Alanine aminotransferase (ALT)",
+            "phrase": "your alanine aminotransferase (alt) level",
             "direction": "increases",
-            "magnitude": 0.222,
-            "observed_value": 51.0,
-            "feature": "n_events"
+            "magnitude": 0.525,
+            "observed_value": 96.0,
+            "feature": "value__LAB/ALT"
           },
           {
-            "concept": "Blood urea nitrogen",
-            "phrase": "your blood urea nitrogen level",
+            "concept": "Systolic blood pressure (std)",
+            "phrase": "the variability in your systolic blood pressure",
             "direction": "increases",
-            "magnitude": 0.173,
-            "observed_value": 35.0,
-            "feature": "value__LAB/UREA_NITROGEN"
+            "magnitude": 0.463,
+            "observed_value": 4.63,
+            "feature": "value__VITAL/SBP_std"
+          },
+          {
+            "concept": "Total bilirubin",
+            "phrase": "your total bilirubin level",
+            "direction": "increases",
+            "magnitude": 0.436,
+            "observed_value": 1.7,
+            "feature": "value__LAB/BILIRUBIN"
           }
         ],
         "probability": 0.6923,
@@ -417,39 +433,31 @@
         "kind": "binary",
         "confidence": "lower",
         "uncertainty": 0.9824,
-        "attribution_method": "approx",
+        "attribution_method": "shap",
         "top_contributors": [
           {
-            "concept": "Total bilirubin",
-            "phrase": "your total bilirubin level",
+            "concept": "Blood urea nitrogen",
+            "phrase": "your blood urea nitrogen level",
             "direction": "increases",
             "magnitude": 1.0,
-            "observed_value": 1.0,
-            "feature": "count__LAB/BILIRUBIN"
-          },
-          {
-            "concept": "Heart rate (mean)",
-            "phrase": "your average heart rate",
-            "direction": "increases",
-            "magnitude": 0.935,
-            "observed_value": 96.5,
-            "feature": "value__VITAL/HR_mean"
-          },
-          {
-            "concept": "Respiratory rate (mean)",
-            "phrase": "your average respiratory rate",
-            "direction": "increases",
-            "magnitude": 0.888,
-            "observed_value": 20.7,
-            "feature": "value__VITAL/RR_mean"
+            "observed_value": 28.0,
+            "feature": "value__LAB/UREA_NITROGEN"
           },
           {
             "concept": "Aspartate aminotransferase (AST)",
             "phrase": "your aspartate aminotransferase (ast) level",
             "direction": "increases",
-            "magnitude": 0.713,
-            "observed_value": 1.0,
-            "feature": "count__LAB/AST"
+            "magnitude": 0.62,
+            "observed_value": 187.0,
+            "feature": "value__LAB/AST"
+          },
+          {
+            "concept": "Total bilirubin",
+            "phrase": "your total bilirubin level",
+            "direction": "increases",
+            "magnitude": 0.557,
+            "observed_value": 2.7,
+            "feature": "value__LAB/BILIRUBIN"
           }
         ],
         "probability": 0.5125,
@@ -466,47 +474,31 @@
         "kind": "regression",
         "confidence": "lower",
         "uncertainty": 1.0,
-        "attribution_method": "approx",
+        "attribution_method": "shap",
         "top_contributors": [
           {
-            "concept": "Respiratory rate (mean)",
-            "phrase": "your average respiratory rate",
+            "concept": "Systolic blood pressure (mean)",
+            "phrase": "your average systolic blood pressure",
             "direction": "increases",
             "magnitude": 1.0,
-            "observed_value": 20.7,
-            "feature": "value__VITAL/RR_mean"
-          },
-          {
-            "concept": "Respiratory disease",
-            "phrase": "a history of respiratory disease",
-            "direction": "increases",
-            "magnitude": 0.873,
-            "observed_value": 1.0,
-            "feature": "count__DX/RESPIRATORY"
-          },
-          {
-            "concept": "Heart rate (mean)",
-            "phrase": "your average heart rate",
-            "direction": "increases",
-            "magnitude": 0.648,
-            "observed_value": 96.5,
-            "feature": "value__VITAL/HR_mean"
-          },
-          {
-            "concept": "Aspartate aminotransferase (AST)",
-            "phrase": "your aspartate aminotransferase (ast) level",
-            "direction": "increases",
-            "magnitude": 0.633,
-            "observed_value": 187.0,
-            "feature": "value__LAB/AST"
+            "observed_value": 88.9,
+            "feature": "value__VITAL/SBP_mean"
           },
           {
             "concept": "Total bilirubin",
             "phrase": "your total bilirubin level",
             "direction": "increases",
-            "magnitude": 0.568,
+            "magnitude": 0.921,
             "observed_value": 2.7,
             "feature": "value__LAB/BILIRUBIN"
+          },
+          {
+            "concept": "Aspartate aminotransferase (AST)",
+            "phrase": "your aspartate aminotransferase (ast) level",
+            "direction": "increases",
+            "magnitude": 0.765,
+            "observed_value": 187.0,
+            "feature": "value__LAB/AST"
           }
         ],
         "point_estimate": 8.976258277893066
@@ -520,39 +512,39 @@
         "kind": "binary",
         "confidence": "lower",
         "uncertainty": 0.7972,
-        "attribution_method": "approx",
+        "attribution_method": "shap",
         "top_contributors": [
-          {
-            "concept": "Oxygen saturation (SpO2) (min)",
-            "phrase": "your lowest oxygen saturation (spo2)",
-            "direction": "increases",
-            "magnitude": 1.0,
-            "observed_value": 94.0,
-            "feature": "value__VITAL/SPO2_min"
-          },
           {
             "concept": "Prior hospital admissions",
             "phrase": "your number of previous hospital admissions",
             "direction": "increases",
-            "magnitude": 0.357,
+            "magnitude": 0.8,
             "observed_value": 2.0,
             "feature": "value__UTIL/N_PRIOR_ADM"
+          },
+          {
+            "concept": "Blood urea nitrogen",
+            "phrase": "your blood urea nitrogen level",
+            "direction": "increases",
+            "magnitude": 0.633,
+            "observed_value": 35.0,
+            "feature": "value__LAB/UREA_NITROGEN"
           },
           {
             "concept": "Respiratory rate (mean)",
             "phrase": "your average respiratory rate",
             "direction": "increases",
-            "magnitude": 0.213,
+            "magnitude": 0.519,
             "observed_value": 20.7,
             "feature": "value__VITAL/RR_mean"
           },
           {
-            "concept": "Bicarbonate",
-            "phrase": "your bicarbonate level",
+            "concept": "Hemoglobin A1c",
+            "phrase": "your hemoglobin a1c level",
             "direction": "increases",
-            "magnitude": 0.131,
-            "observed_value": 27.0,
-            "feature": "value__LAB/BICARBONATE"
+            "magnitude": 0.408,
+            "observed_value": 0.0,
+            "feature": "value__LAB/HBA1C"
           }
         ],
         "probability": 0.6449,
@@ -569,39 +561,23 @@
         "kind": "binary",
         "confidence": "moderate",
         "uncertainty": 0.5999,
-        "attribution_method": "approx",
+        "attribution_method": "shap",
         "top_contributors": [
-          {
-            "concept": "Prior hospital admissions",
-            "phrase": "your number of previous hospital admissions",
-            "direction": "increases",
-            "magnitude": 1.0,
-            "observed_value": 2.0,
-            "feature": "value__UTIL/N_PRIOR_ADM"
-          },
           {
             "concept": "Sex",
             "phrase": "sex recorded as female",
             "direction": "increases",
-            "magnitude": 0.874,
+            "magnitude": 0.682,
             "observed_value": 1.0,
             "feature": "sex_female"
           },
           {
-            "concept": "Blood urea nitrogen",
-            "phrase": "your blood urea nitrogen level",
+            "concept": "Prior hospital admissions",
+            "phrase": "your number of previous hospital admissions",
             "direction": "increases",
-            "magnitude": 0.159,
-            "observed_value": 35.0,
-            "feature": "value__LAB/UREA_NITROGEN"
-          },
-          {
-            "concept": "Overall care activity",
-            "phrase": "how much recent healthcare activity you've had",
-            "direction": "increases",
-            "magnitude": 0.15,
-            "observed_value": 51.0,
-            "feature": "n_events"
+            "magnitude": 0.608,
+            "observed_value": 2.0,
+            "feature": "value__UTIL/N_PRIOR_ADM"
           }
         ],
         "probability": 0.2142,
@@ -618,15 +594,31 @@
         "kind": "binary",
         "confidence": "moderate",
         "uncertainty": 0.519,
-        "attribution_method": "approx",
+        "attribution_method": "shap",
         "top_contributors": [
           {
             "concept": "Blood urea nitrogen",
             "phrase": "your blood urea nitrogen level",
             "direction": "increases",
-            "magnitude": 0.496,
+            "magnitude": 0.93,
             "observed_value": 35.0,
             "feature": "value__LAB/UREA_NITROGEN"
+          },
+          {
+            "concept": "Systolic blood pressure (last)",
+            "phrase": "your latest systolic blood pressure",
+            "direction": "increases",
+            "magnitude": 0.493,
+            "observed_value": 85.0,
+            "feature": "value__VITAL/SBP_last"
+          },
+          {
+            "concept": "Chloride",
+            "phrase": "your chloride level",
+            "direction": "increases",
+            "magnitude": 0.482,
+            "observed_value": 97.0,
+            "feature": "value__LAB/CHLORIDE"
           }
         ],
         "probability": 0.1564,
@@ -643,17 +635,8 @@
         "kind": "binary",
         "confidence": "moderate",
         "uncertainty": 0.3753,
-        "attribution_method": "approx",
-        "top_contributors": [
-          {
-            "concept": "Blood urea nitrogen",
-            "phrase": "your blood urea nitrogen level",
-            "direction": "increases",
-            "magnitude": 0.212,
-            "observed_value": 35.0,
-            "feature": "value__LAB/UREA_NITROGEN"
-          }
-        ],
+        "attribution_method": null,
+        "top_contributors": [],
         "probability": 0.0538,
         "probability_pct": 5,
         "logit": -2.2615,
@@ -668,33 +651,8 @@
         "kind": "binary",
         "confidence": "moderate",
         "uncertainty": 0.347,
-        "attribution_method": "approx",
-        "top_contributors": [
-          {
-            "concept": "Blood urea nitrogen",
-            "phrase": "your blood urea nitrogen level",
-            "direction": "increases",
-            "magnitude": 1.0,
-            "observed_value": 35.0,
-            "feature": "value__LAB/UREA_NITROGEN"
-          },
-          {
-            "concept": "Overall care activity",
-            "phrase": "how much recent healthcare activity you've had",
-            "direction": "increases",
-            "magnitude": 0.677,
-            "observed_value": 51.0,
-            "feature": "n_events"
-          },
-          {
-            "concept": "Aspartate aminotransferase (AST)",
-            "phrase": "your aspartate aminotransferase (ast) level",
-            "direction": "increases",
-            "magnitude": 0.583,
-            "observed_value": 168.0,
-            "feature": "value__LAB/AST"
-          }
-        ],
+        "attribution_method": null,
+        "top_contributors": [],
         "probability": 0.0336,
         "probability_pct": 3,
         "logit": -2.7832,
@@ -709,25 +667,8 @@
         "kind": "binary",
         "confidence": "higher",
         "uncertainty": 0.3241,
-        "attribution_method": "approx",
-        "top_contributors": [
-          {
-            "concept": "Blood urea nitrogen",
-            "phrase": "your blood urea nitrogen level",
-            "direction": "increases",
-            "magnitude": 0.182,
-            "observed_value": 35.0,
-            "feature": "value__LAB/UREA_NITROGEN"
-          },
-          {
-            "concept": "Overall care activity",
-            "phrase": "how much recent healthcare activity you've had",
-            "direction": "increases",
-            "magnitude": 0.144,
-            "observed_value": 51.0,
-            "feature": "n_events"
-          }
-        ],
+        "attribution_method": null,
+        "top_contributors": [],
         "probability": 0.0172,
         "probability_pct": 2,
         "logit": -3.3735,
@@ -739,11 +680,11 @@
   },
   "report": {
     "sections": {
-      "What we found": "These are statistical estimates from a machine-learning model for a 52-year-old female, not confirmed facts. The model estimates a 74% chance related to survival over the next 12 months (1-year mortality), labelled with moderate confidence. It estimates a 69% chance of readmission within the next 30 days and a 51% chance of a prolonged stay during this admission \u2014 both of these carry lower confidence, so they should be treated with extra caution. For existing chronic conditions, the model estimates a 64% likelihood of respiratory disease (lower confidence), a 21% likelihood of a depression or anxiety disorder (moderate confidence), a 16% likelihood of cardiovascular disease (moderate confidence), and lower estimated likelihoods for hypertension (5%), diabetes (3%), and hyperlipidemia (2%). The model also gives an estimated length of stay of about 9 days (lower confidence). None of these are diagnoses.",
-      "What may be contributing": "The model noticed certain factors as associations, not proven causes. For the survival estimate, it highlighted the number of previous hospital admissions, a history of respiratory disease, and blood urea nitrogen level. For the readmission estimate, it pointed to prior admissions, a history of respiratory disease, and the amount of recent healthcare activity. For the prolonged-stay and length-of-stay estimates, it noted total bilirubin level, average heart rate, and average respiratory rate. These are patterns the model linked to the estimates, not confirmed reasons.",
-      "What this means": "These figures are model-generated probabilities, not certainties or diagnoses. The 1-year survival estimate has moderate confidence, while the readmission, prolonged-stay, and length-of-stay estimates have lower confidence and should be interpreted with particular caution \u2014 they may be less reliable. The chronic-condition likelihoods vary in confidence as well; even the respiratory-disease estimate is marked lower confidence. A statistical estimate cannot tell you what will actually happen, and a qualified clinician who can review your full situation is best placed to interpret what these numbers mean for you.",
-      "What to do next": "Consider sharing this summary with a doctor or another qualified clinician who can review it alongside your actual history and examination. It may help to ask them about the factors the model flagged \u2014 such as previous hospital admissions and lab values like blood urea nitrogen and bilirubin \u2014 and what monitoring or follow-up they would suggest. This is educational information to support a conversation, not medical advice or instructions about any treatment or medication.",
-      "When to seek care urgently": "Seek urgent medical attention if you experience warning signs such as difficulty breathing or severe shortness of breath, chest pain or pressure, confusion or difficulty staying awake, fainting, coughing up or vomiting blood, a high fever you cannot control, or any symptom that feels severe or rapidly worsening. When in doubt, contact emergency services or go to the nearest emergency department."
+      "What we found": "These are statistical estimates from a machine-learning model, not confirmed facts about your health. For the next 12 months, the model estimated a 74% chance related to survival (1-year mortality), with moderate confidence. It also estimated a 69% chance of being readmitted to hospital within the next 30 days, and a 51% chance of a prolonged stay during this admission \u2014 both of these carried lower confidence, so they should be treated with extra caution. For estimated chronic conditions, the model flagged respiratory disease at 64% likelihood (lower confidence), a depression or anxiety disorder at 21% (moderate confidence), and cardiovascular disease at 16% (moderate confidence), with lower estimated likelihoods for hypertension (5%), diabetes (3%), and dyslipidemia (2%).",
+      "What may be contributing": "The model noticed associations \u2014 not proven causes \u2014 between these estimates and certain listed factors. For the survival estimate, it pointed to your creatinine, blood urea nitrogen, and sodium levels. For the readmission estimate, it noted your number of previous hospital admissions along with your sodium and ALT levels. For a longer stay, it highlighted your blood urea nitrogen, AST, and total bilirubin levels, and it also linked your average systolic blood pressure to an estimated length of stay of about 9 days. These are patterns the model detected in data, not confirmed explanations for your situation.",
+      "What this means": "It is important to keep these numbers in perspective. They are model-generated probabilities, not certainties or diagnoses. The 1-year estimate had moderate confidence, while the readmission, prolonged-stay, and length-of-stay estimates had lower confidence and should be interpreted especially cautiously. Similarly, the respiratory-disease likelihood had lower confidence. A statistical estimate cannot tell you what will actually happen, and only a qualified clinician who can review your full picture can put these figures into proper context.",
+      "What to do next": "Consider sharing this summary with a doctor or another qualified clinician who can review the underlying details alongside your medical history. It may help to ask them about the factors the model highlighted, such as kidney-related lab values, sodium, liver-related values, blood pressure, and your history of prior admissions, and what they mean for you. Bring any questions about follow-up, monitoring, or care planning to that conversation rather than making changes on your own.",
+      "When to seek care urgently": "Seek urgent medical attention if you experience warning signs such as chest pain or pressure, severe difficulty breathing or shortness of breath, sudden weakness or numbness, trouble speaking, fainting or loss of consciousness, confusion, a very high fever, or any symptom that feels severe or rapidly worsening. When in doubt, contact emergency services or go to the nearest emergency department."
     },
     "disclaimer": "This summary is generated by a computer model to help you understand your health information. It is not a diagnosis and not a substitute for advice from a qualified clinician. Always talk to your healthcare provider about your results and any decisions."
   }
