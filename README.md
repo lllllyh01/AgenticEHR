@@ -30,35 +30,44 @@ are two output modes (the same safety guardrails apply to both):
 
 ```
 structured EHR events
-        │  data/  (ingest → CountFeaturizer → EHRDataset)
+        │  data/  (ingest → CountFeaturizer → EHRDataset / MIMIC)
         ▼
-  feature matrix X ───────────────► models/  BaseModel (XGBoost baselines)
-        │                                  │  calibrated proba + uncertainty
+  feature matrix X ───────────────► models/  BaseModel
+        │                                  │  XGBoostClassifierModel (proba + uncertainty)
+        │                                  │  XGBoostRegressionModel (point estimate)
         │                                  ▼
         │                          explain/  Attributor (SHAP / fallback)
         │                                  + ConceptMap (codes → plain language)
+        │                                  │
         │                                  ▼
-        └────────────────────────►   RiskProfile   ◄─ the ONLY model→agent contract
+        └──────────────►  RiskProfile  /  HealthRiskProfile  ◄─ the ONLY model→agent contract
+                          (single task)    (multi-task)
                                            │
                                            ▼
                                     agent/  SummaryAgent + guardrails
                                            │  (LLM agent: Gemini | Claude | GPT)
                                            ▼
                                     PatientSummary (5 sections)
+                                           │
+                                           ▼  (optional) eval/response_log
+                                    JSON / MD / TXT record for review
 ```
 
 The five summary sections are always: **What we found · What may be contributing
 · What this means · What to do next · When to seek care urgently**, followed by
-a standing disclaimer.
+a standing disclaimer. `SummaryAgent` consumes a single-task `RiskProfile` or a
+multi-task `HealthRiskProfile` (the MIMIC prediction panel) through the same
+interface.
 
 ### Layers (`src/agentic_ehr/`)
 | Module        | Responsibility                                                                            |
 | ------------- | ----------------------------------------------------------------------------------------- |
 | `data/`       | Schema, synthetic generator, FEMR/EHR-shot loader, `CountFeaturizer`, `EHRDataset`        |
-| `models/`     | `BaseModel` ABC, `XGBoostClassifierModel` (+ regression) (calibration, save/load), registry                    |
-| `explain/`    | `Attributor` (SHAP + fallback), `ConceptMap`, **`RiskProfile`** contract                  |
+| `data/mimic/` | MIMIC-IV cohort/feature/label build (DuckDB), task registry, multi-task train + inference |
+| `models/`     | `BaseModel` ABC, `XGBoostClassifierModel` + `XGBoostRegressionModel`, registry            |
+| `explain/`    | `Attributor` (SHAP + fallback), `ConceptMap`, **`RiskProfile`** / `HealthRiskProfile`     |
 | `agent/`      | `SummaryAgent` (LLM-only, no-fallback), provider backends (Gemini/Claude/GPT), guardrails |
-| `eval/`       | Predictive metrics (AUROC/AUPRC/Brier/ECE) + summary-quality checks                       |
+| `eval/`       | Predictive metrics (classification + regression) + summary quality + response logging     |
 | `pipeline.py` | End-to-end orchestration (`train`, `InferenceService`)                                    |
 
 ---
@@ -73,6 +82,7 @@ export GEMINI_API_KEY=...   # required for the default (Gemini) LLM summary agen
 # optional extras:
 pip install -e ".[openai]"  # the GPT provider (then set agent.llm.provider: openai)
 pip install -e ".[explain]" # SHAP attributions (otherwise a built-in fallback is used)
+pip install -e ".[mimic]"   # DuckDB + pyarrow for the MIMIC-IV multi-task pipeline
 pip install -e ".[dev]"     # pytest
 ```
 
@@ -101,7 +111,7 @@ agentic-ehr demo --patient-id SYN000123 --no-template
 If the `agentic-ehr` console script isn't on your `PATH`, run it as a module:
 `python -m agentic_ehr.cli train`, etc.
 
-### Demo inference output (with template)
+### Demo inference output
 1. With Template:
 
 ```
@@ -172,14 +182,89 @@ Extend the plain-language `ConceptMap` for a new vocabulary via
 
 ---
 
+## Using MIMIC-IV Data
+
+**Prerequisites**
+
+1. Download [MIMIC-IV](https://physionet.org/content/mimiciv/) to `agentic-ehr/datasets/` directory ([TODO]: download mimic-iv-ed?). 
+2. Install the `mimic` extra requirements: `pip install -e ".[mimic]"`.
+
+**Tasks** Two groups of prediction tasks are trained on MIMIC-IV on a shared feature set, playing complementary roles in the health summary.
+
+  **1. Chronic panel (context)**. A set of binary classifiers that identify which chronic conditions the patient currently has, painting the patient's present health picture. To prevent label leakage, each chronic task drops the feature columns that *define* its own target, including the previous diagnosis and definitive lab test results. For example, the "diabetes" task drops HbA1c, glucose, and diabetes codes. All per-target exclusions are declared in DX_DEFINING_FEATURES.
+  - *Open question*: Do we really need to exclude the defining labs? Clinicians themselves rely on these "definitive" results to diagnose, so dropping them may make the model harder than the real clinical setting. Worth revisiting.
+
+  **2. Forward panel (future)**. Forward-looking outcomes that drive advice.
+
+The following table lists detailed tasks included in these two panels. All are defined in `data/mimic/tasks.py`.
+
+| Panel   | Task                                                                                    | Type              | Input observed up to |
+| ------- | --------------------------------------------------------------------------------------- | ----------------- | -------------------- |
+| forward | 1-year mortality, 30-day readmission                                                    | binary            | discharge            |
+| forward | prolonged stay (≥7d)                                                                    | binary            | admission + 24h      |
+| forward | length of stay                                                                          | regression (days) | admission + 24h      |
+| chronic | diabetes, hypertension, hyperlipidemia, cardiovascular, respiratory, depression/anxiety | binary            | discharge            |
+
+**Observation window & inputs.** One index admission per adult survivor (first
+hospital stay containing an ICU stay). Each task declares an **observation
+window** — the point up to which its input features may be observed, a
+`TaskSpec.window` given in hours after admission (`None` = up to discharge):
+
+- Most tasks observe **up to discharge** (`window = None`).
+- Length-of-stay tasks (`prolonged_stay`, `los_days`) observe only the **first
+  24h** (`window = 24`), because predicting how long a stay lasts must not see
+  end-of-stay data — otherwise the task is circular. The build emits one events
+  file per distinct window (`events.parquet`, `events_24h.parquet`) and each
+  task trains/infers on its own window.
+
+Shared features (per window): vital-sign summary statistics, a lab panel (latest
+value), prior-admission comorbidity history, prior-admission count, and
+demographics. See [No data leakage](#no-data-leakage-temporal-integrity) for the
+additionally dropped label-defining columns (e.g. HbA1c/glucose for the diabetes
+task).
+
+**Run it** (see the walkthrough below):
+
+```bash
+# 1) Build the FEMR-style events + per-task label tables (one-time, ~5 min).
+python -m agentic_ehr.data.mimic.build --root agentic-ehr/datasets/physionet.org/files/mimiciv/3.1 --out-dir artifacts/mimic
+
+# 2) Train all tasks (dispatched by data.source: mimic).
+agentic-ehr --config config/mimic.yaml train
+
+# 3) Per-task held-out metrics (no LLM call).
+agentic-ehr --config config/mimic.yaml evaluate
+
+# 4) Prediction panel + LLM health report for one patient (needs GEMINI_API_KEY).
+agentic-ehr --config config/mimic.yaml demo --patient-id <hadm_id>
+#    optionally persist the record (predictions + logits + features on top of the report):
+agentic-ehr --config config/mimic.yaml demo --save-response artifacts/responses --response-format json,md
+```
+
+Each patient becomes a **`HealthRiskProfile`** — a panel of per-task predictions
+(each with its probability/point-estimate, confidence, and SHAP-attributed
+contributors) sharing one snapshot. The agent reads it exactly like a single
+`RiskProfile`; `--save-response DIR` writes the metadata, per-task logits, feature input, and report for clinician review, to:
+
+```
+DIR/<dataset>/<provider>_<patient_id>.<ext>
+# e.g. artifacts/responses/mimic/claude_29079034.json  (+ .md / .txt per --response-format)
+```
+
+where `<dataset>` is `data.source` (mimic / synthetic / femr) and `<provider>` is `agent.llm.provider` (gemini / claude / openai).
+
+---
+
 ## Replacing the baseline model
 
 The agent depends on `RiskProfile`, **not** on XGBoost. To plug in a new model:
 
 1. Implement the `BaseModel` interface (`src/agentic_ehr/models/base.py`):
-   `fit`, `predict_proba`, `predict_output` (returns `ModelOutput` with a
-   probability + uncertainty), `feature_importance`, `feature_names`,
-   `save`/`load`.
+   `fit`, `predict_output` (returns `ModelOutput` with a probability or a
+   regression point estimate + uncertainty), `feature_importance`,
+   `feature_names`, `save`/`load`. `predict_proba` is classification-only (the
+   base class raises `NotImplementedError` by default, which regression models
+   keep).
 2. Register it:
    ```python
    from agentic_ehr.models.registry import register_model
@@ -189,17 +274,31 @@ The agent depends on `RiskProfile`, **not** on XGBoost. To plug in a new model:
    `pipeline._load_model`.
 
 Because attributions flow through the same `Attributor` → `RiskProfileBuilder`
-path, **the agent, guardrails, API, and evaluation all keep working unchanged**.
+path, **the agent, guardrails, and evaluation all keep working unchanged**.
 For a model without feature attributions, return an empty
 `feature_importance()` and the agent will gracefully produce a summary without a
 contributors list.
 
 ---
 
+## No data leakage (temporal integrity)
+
+A prediction model must never see its answer during training.
+
+- **Temporal causality** — features use only information available strictly before the prediction time (or within a window that ends at it). Nothing recorded afterward may enter the inputs.
+- **No label-defining inputs** — any signal used to *define* a label is excluded from that task's features. E.g. the "diabetes" task drops HbA1c, glucose, and diabetes codes; otherwise the task is circular.
+- **No future / same-episode outcome leakage** — discharge diagnoses, discharge
+  time, and death flags are labels, never features; comorbidity history is taken
+  only from *prior* admissions.
+- **Train and inference use the identical, leakage-free feature set**, built by
+  the same code path.
+
+---
+
 ## Evaluation
 
-- **Predictive** (`eval/model_eval.py`): AUROC, AUPRC, Brier score, expected
-  calibration error.
+- **Predictive** (`eval/model_eval.py`): AUROC, AUPRC, Brier, ECE (classification)
+  and MAE / RMSE / R² (regression, e.g. length of stay).
 - **Summary quality** (`eval/summary_eval.py`), pragmatic automatic checks:
   - **factual consistency** — stated risk % matches the `RiskProfile`;
   - **no unsupported claims** — no banned diagnostic/overclaiming phrases, and
