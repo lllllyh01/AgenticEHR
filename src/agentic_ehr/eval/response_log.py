@@ -56,7 +56,12 @@ def build_record(patient_id, profile, summary, *, model_info: dict | None = None
         "mode": summary.mode,
         "model": model_info or {},
     }
-    if isinstance(profile, HealthRiskProfile):
+    if profile is None:  # LLM baseline: raw EHR fed directly, no prediction model
+        predictions = {"note": "LLM baseline — raw EHR fed directly to the model; "
+                               "no prediction model, score, or attribution."}
+        snapshot = None
+        demographics = (features or {}).get("demographics", {})
+    elif isinstance(profile, HealthRiskProfile):
         predictions = {
             "forward": [_prediction(t) for t in profile.forward],
             "chronic": [_prediction(t) for t in profile.chronic],

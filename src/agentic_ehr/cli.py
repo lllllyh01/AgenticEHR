@@ -79,6 +79,11 @@ def _cmd_demo(args) -> int:
     if cfg.get("data.source") == "mimic":
         return _demo_mimic(args, cfg)
 
+    if getattr(args, "baseline", False):
+        print("--baseline is only supported for the MIMIC path (data.source: mimic).",
+              file=sys.stderr)
+        return 2
+
     from .pipeline import InferenceService
 
     svc = InferenceService.from_config(cfg, model_path=args.model)
@@ -119,6 +124,10 @@ def _demo_mimic(args, cfg) -> int:
 
     svc = MultiTaskInferenceService.from_config(cfg, model_dir=args.model)
     patient_id = args.patient_id or svc.any_patient_id()
+
+    if getattr(args, "baseline", False):
+        return _demo_mimic_baseline(args, cfg, svc, patient_id)
+
     # Featurize the patient once when also saving the response.
     if args.save_response:
         profile, features = svc.profile_and_features(patient_id)
@@ -151,16 +160,42 @@ def _demo_mimic(args, cfg) -> int:
     return 0
 
 
-def _save_response(args, cfg, patient_id, profile, summary, *, model_info, features) -> None:
+def _demo_mimic_baseline(args, cfg, svc, patient_id) -> int:
+    """LLM baseline (M5): raw EHR values -> LLM, no prediction model / attribution.
+
+    The ablation control for the agentic pipeline. Same LLM + output format as the agent;
+    the only difference is the input carries no model predictions."""
+    from .agent.baseline import LLMBaselineAgent
+
+    raw = svc.raw_ehr_payload_for(patient_id)
+    print("=" * 72)
+    print(f"PATIENT {patient_id} | LLM BASELINE (raw EHR -> LLM, no prediction model)")
+    print("=" * 72)
+    report = LLMBaselineAgent.from_config(cfg).summarize(raw, use_template=not args.no_template)
+    print(report.to_text())
+    if report.guardrail_warnings:
+        print("\n[guardrail warnings]", report.guardrail_warnings, file=sys.stderr)
+    if getattr(args, "save_response", None) is not None:
+        _save_response(args, cfg, patient_id, None, report,
+                         model_info={"baseline": "raw-ehr-to-llm"}, features=raw,
+                         variant="baseline")
+    return 0
+
+
+def _save_response(args, cfg, patient_id, profile, summary, *, model_info, features,
+                   variant=None) -> None:
     from pathlib import Path
 
     from .eval.response_log import build_record, write_record
 
-    # <base>/<dataset>/<provider>_<patient_id>.<ext>  e.g. artifacts/responses/mimic/claude_22595853.json
+    # <base>/<dataset>/<provider>[-<variant>]_<patient_id>.<ext>
+    # e.g. artifacts/responses/mimic/claude_22595853.json (agent)
+    #      artifacts/responses/mimic/claude-baseline_22595853.json (LLM baseline)
     dataset = cfg.get("data.source", "synthetic")
     provider = cfg.get("agent.llm.provider", "gemini")
+    label = f"{provider}-{variant}" if variant else provider
     out_dir = str(Path(args.save_response) / dataset)
-    out_filename = f"{provider}_{patient_id}"
+    out_filename = f"{label}_{patient_id}"
     formats = tuple(f.strip() for f in (args.response_format or "json,md").split(","))
     record = build_record(patient_id, profile, summary, model_info=model_info, features=features)
     paths = write_record(record, out_dir, formats=formats, out_filename=out_filename)
@@ -192,6 +227,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Write the prediction metadata + report to DIR for review.")
     d.add_argument("--response-format", default="json,md",
                    help="Comma-separated formats to save: json,md,txt (default: json,md).")
+    d.add_argument("--baseline", action="store_true",
+                   help="LLM baseline (mimic): feed the patient's raw EHR values straight "
+                        "to the LLM, with no prediction model or attributions.")
     d.set_defaults(func=_cmd_demo)
 
     return p

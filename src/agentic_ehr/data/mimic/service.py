@@ -106,6 +106,40 @@ class MultiTaskInferenceService:
         _, x_by_window = self._inputs(patient_id)
         return _feature_dict(x_by_window)
 
+    def raw_ehr_payload_for(self, patient_id: str) -> dict:
+        """Readable raw clinical values for the LLM baseline (M5): the SAME
+        discharge-window features the pipeline uses, translated to plain names, with NO
+        model prediction, score, or attribution attached."""
+        rec, x_by_window = self._inputs(patient_id)
+        row = x_by_window[_SNAPSHOT_WINDOW].iloc[0]
+        concepts = mimic_concept_map()
+        vitals: dict[str, float] = {}
+        labs: dict[str, float] = {}
+        history: list[str] = []
+        prior_admissions = None
+        for col, val in row.items():
+            if pd.isna(val):
+                continue
+            code = col[len("value__"):] if col.startswith("value__") else col
+            name = concepts[code].name if code in concepts else code
+            family = code.split("/", 1)[0]
+            if family == "VITAL" and col.startswith("value__"):
+                vitals[name] = round(float(val), 2)
+            elif family == "LAB" and col.startswith("value__"):
+                labs[name] = round(float(val), 2)
+            elif family == "DX" and float(val) >= 1 and name not in history:
+                history.append(name)
+            elif family == "UTIL":
+                prior_admissions = round(float(val), 1)
+        return {
+            "demographics": {"age": rec.demographics.get("age"), "sex": rec.demographics.get("sex")},
+            "vital_signs": vitals,
+            "lab_results": labs,
+            "past_conditions": history,
+            "prior_admissions": prior_admissions,
+            "note": "Raw recorded clinical values. No model prediction or score is provided.",
+        }
+
     def any_patient_id(self) -> str:
         return next(iter(self.records[_SNAPSHOT_WINDOW].values())).patient_id
 
