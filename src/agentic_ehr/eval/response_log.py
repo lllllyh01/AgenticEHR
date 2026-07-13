@@ -80,9 +80,9 @@ def build_record(patient_id, profile, summary, *, model_info: dict | None = None
 
     return {
         "metadata": meta,
-        "input": {"demographics": demographics, "features": features, "snapshot": snapshot},
-        "predictions": predictions,
         "report": {"sections": summary.sections, "disclaimer": summary.disclaimer},
+        "predictions": predictions,
+        "input": {"demographics": demographics, "features": features, "snapshot": snapshot},
     }
 
 
@@ -92,14 +92,14 @@ def to_markdown(record: dict) -> str:
              f"- generated_at: {m['generated_at']}",
              f"- agent_backend: {m['agent_backend']} | mode: {m['mode']}",
              f"- model: {json.dumps(m['model'])}", "",
-             "## Predictions (model output — above the report)", "",
-             "```json", json.dumps(record["predictions"], indent=2), "```", "",
-             "## EHR feature input", "",
-             "```json", json.dumps(record["input"], indent=2, default=str), "```", "",
              "## Agent report", ""]
     for sec, txt in record["report"]["sections"].items():
         lines += [f"### {sec}", txt, ""]
-    lines += ["---", f"_{record['report']['disclaimer']}_"]
+    lines += ["---", f"_{record['report']['disclaimer']}_", "",
+              "## Predictions (model output — below the report)", "",
+              "```json", json.dumps(record["predictions"], indent=2), "```", "",
+              "## EHR feature input", "",
+              "```json", json.dumps(record["input"], indent=2, default=str), "```"]
     return "\n".join(lines)
 
 
