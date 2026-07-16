@@ -73,6 +73,7 @@ class TaskPrediction:
     risk_tier: str | None = None             # binary only
     auroc: float | None = None               # held-out test AUROC (binary only)
     point_estimate: float | None = None      # regression only
+    reliability: str | None = None           # model-quality tier: reliable | moderate | weak
 
     @property
     def probability_pct(self) -> int | None:
@@ -82,7 +83,8 @@ class TaskPrediction:
         return asdict(self)
 
     @classmethod
-    def from_risk_profile(cls, rp: "RiskProfile", spec, auroc: float) -> "TaskPrediction":
+    def from_risk_profile(cls, rp: "RiskProfile", spec, auroc: float,
+                          reliability: str | None = None) -> "TaskPrediction":
         """Build a binary task prediction from a single-task RiskProfile.
 
         ``spec`` is duck-typed (needs ``name``/``label``/``group``/
@@ -94,18 +96,18 @@ class TaskPrediction:
             uncertainty=rp.uncertainty, confidence_label=rp.confidence_label,
             contributors=rp.contributors, protective_factors=rp.protective_factors,
             probability=rp.probability, raw_probability=rp.raw_probability,
-            risk_tier=rp.risk_tier, auroc=auroc,
+            risk_tier=rp.risk_tier, auroc=auroc, reliability=reliability,
         )
 
     @classmethod
     def regression(cls, spec, *, point_estimate, uncertainty, confidence_label,
-                   contributors, protective_factors) -> "TaskPrediction":
+                   contributors, protective_factors, reliability: str | None = None) -> "TaskPrediction":
         return cls(
             name=spec.name, label=spec.label, group=spec.group, kind="regression",
             positive_label=spec.positive_label, horizon=spec.horizon,
             uncertainty=uncertainty, confidence_label=confidence_label,
             contributors=contributors, protective_factors=protective_factors,
-            point_estimate=point_estimate,
+            point_estimate=point_estimate, reliability=reliability,
         )
 
 

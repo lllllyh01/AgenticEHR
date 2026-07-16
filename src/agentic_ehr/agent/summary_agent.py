@@ -4,8 +4,9 @@ The AI (LLM) summary agent is the core of the system — and the only summary
 generator. It handles BOTH a single-task :class:`RiskProfile` (one prediction)
 and a multi-label :class:`HealthRiskProfile` (a prediction panel), dispatching on
 the profile type. There is **no fallback**: if the backend cannot run (missing
-SDK / API key, or an API error) or its output fails the safety guardrails, the
-agent RAISES so the failure is surfaced. The backend is provider-agnostic
+SDK / API key, or an API error) the agent RAISES so the failure is surfaced.
+Safety-guardrail violations are **non-blocking** — they are recorded on the
+returned summary (``guardrail_warnings``) but do not abort it. The backend is provider-agnostic
 (Gemini / Claude / GPT) and pure transport; see :mod:`agent.llm_backend`.
 
 The constructor accepts any object implementing the backend contract
@@ -43,6 +44,7 @@ def _health_payload(profile: HealthRiskProfile) -> dict:
                 "outcome": t.label,
                 "chance_percent": t.probability_pct,
                 "confidence": t.confidence_label,
+                "model_reliability": t.reliability,
                 "horizon": t.horizon,
                 "top_factors": [c.patient_phrase for c in t.contributors[:3]],
             }
@@ -50,13 +52,13 @@ def _health_payload(profile: HealthRiskProfile) -> dict:
         ],
         "expected_outcomes": [
             {"outcome": t.label, "estimate": round(t.point_estimate, 1),
-             "confidence": t.confidence_label,
+             "confidence": t.confidence_label, "model_reliability": t.reliability,
              "top_factors": [c.patient_phrase for c in t.contributors[:3]]}
             for t in profile.forward if t.kind == "regression" and t.point_estimate is not None
         ],
         "chronic_profile": [
             {"condition": t.label, "likelihood_percent": t.probability_pct,
-             "confidence": t.confidence_label}
+             "confidence": t.confidence_label, "model_reliability": t.reliability}
             for t in profile.chronic
         ],
         "recent_snapshot": profile.snapshot,
@@ -127,9 +129,10 @@ class SummaryAgent:
         """Generate a summary from a RiskProfile or a HealthRiskProfile.
 
         ``use_template=True`` produces the five fixed sections (structured
-        output); ``use_template=False`` produces one free-form narrative. The
-        safety guardrails apply in both modes. No fallback: a failure here is
-        surfaced to the caller, never replaced by a silently-substituted summary.
+        output); ``use_template=False`` produces one free-form narrative. Safety
+        guardrails run in both modes but are non-blocking: any violations are
+        attached to the returned summary's ``guardrail_warnings`` rather than
+        raised, so a report is always produced.
         """
         if isinstance(profile, HealthRiskProfile):
             sections = self.backend.run_sections(
@@ -149,9 +152,12 @@ class SummaryAgent:
             risk_tier = profile.risk_tier
             probability_pct = profile.probability_pct
 
+        # Non-blocking guardrails: violations are recorded on the summary and surfaced
+        # to the caller, but do NOT raise — a report is always produced (parallels the LLM
+        # baseline). The warning rate becomes a comparison signal rather than an abort.
         if warnings:
-            logger.error("Guardrail violations from %s backend: %s", self.backend.name, warnings)
-            raise SummaryGuardrailError(warnings)
+            logger.warning("Guardrail warnings from %s backend (not blocking): %s",
+                           self.backend.name, warnings)
 
         return PatientSummary(
             sections=sections,
@@ -160,7 +166,7 @@ class SummaryAgent:
             risk_tier=risk_tier,
             probability_pct=probability_pct,
             mode="template" if use_template else "free",
-            guardrail_warnings=[],
+            guardrail_warnings=warnings,
         )
 
     # ----- guardrails --------------------------------------------------------

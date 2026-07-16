@@ -55,6 +55,20 @@ _MAX_BACKGROUND = 4000
 _SNAPSHOT_WINDOW = None   # discharge window: richest record; used for the agent snapshot
 
 
+def _reliability(kind: str, metrics: dict) -> str:
+    """Task-model quality tier from held-out metrics — drives how much the report is
+    allowed to lean on a prediction (Lever 3: don't headline weak-model outputs)."""
+    if kind == "regression":
+        r2 = metrics.get("r2")
+        if r2 is None:
+            return "unknown"
+        return "reliable" if r2 >= 0.4 else "moderate" if r2 >= 0.2 else "weak"
+    auroc = metrics.get("auroc")
+    if auroc is None:
+        return "unknown"
+    return "reliable" if auroc >= 0.75 else "moderate" if auroc >= 0.65 else "weak"
+
+
 class MultiTaskInferenceService:
     def __init__(self, cfg: Config, model: MultiTaskModel, records_by_window: dict[str, list]):
         self.cfg = cfg
@@ -120,7 +134,9 @@ class MultiTaskInferenceService:
         for col, val in row.items():
             if pd.isna(val):
                 continue
-            code = col[len("value__"):] if col.startswith("value__") else col
+            # Columns are prefixed by the featurizer: ``value__<code>`` (numeric value)
+            # and ``count__<code>`` (occurrence count). Strip either prefix to the code.
+            code = col.split("__", 1)[-1] if "__" in col else col
             name = concepts[code].name if code in concepts else code
             family = code.split("/", 1)[0]
             if family == "VITAL" and col.startswith("value__"):
@@ -128,8 +144,9 @@ class MultiTaskInferenceService:
             elif family == "LAB" and col.startswith("value__"):
                 labs[name] = round(float(val), 2)
             elif family == "DX" and float(val) >= 1 and name not in history:
+                # DX presence comes from the count__ column (no value__ column exists).
                 history.append(name)
-            elif family == "UTIL":
+            elif family == "UTIL" and col.startswith("value__"):
                 prior_admissions = round(float(val), 1)
         return {
             "demographics": {"age": rec.demographics.get("age"), "sex": rec.demographics.get("sex")},
@@ -169,7 +186,9 @@ class MultiTaskInferenceService:
                     positive_label=tm.spec.positive_label, horizon=tm.spec.horizon,
                 )
                 rp = builder.build(out, x_cols, snapshot, task_meta, self.top_k)
-                tp = TaskPrediction.from_risk_profile(rp, tm.spec, float(tm.metrics.get("auroc", 0.0)))
+                tp = TaskPrediction.from_risk_profile(
+                    rp, tm.spec, float(tm.metrics.get("auroc", 0.0)),
+                    reliability=_reliability("binary", tm.metrics))
             (forward if tm.spec.group == "forward" else chronic).append(tp)
 
         by_prob = lambda t: t.probability if t.probability is not None else -1.0
@@ -195,6 +214,7 @@ class MultiTaskInferenceService:
             confidence_label=RiskProfileBuilder.confidence_label(out.uncertainty),
             contributors=[builder.to_view(c, max_mag) for c in contribs if c.signed_impact > 0],
             protective_factors=[builder.to_view(c, max_mag) for c in contribs if c.signed_impact < 0],
+            reliability=_reliability("regression", tm.metrics),
         )
 
 
